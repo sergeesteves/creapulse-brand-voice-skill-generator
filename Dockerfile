@@ -16,8 +16,9 @@ RUN pip install -r requirements.txt
 
 COPY app ./app
 
-# Utilisateur non-root
-RUN useradd -r -u 10001 appuser && chown -R appuser /app
+# Utilisateur non-root ; /data = volume persistant (SQLite). Créé ici pour que le volume nommé
+# hérite de l'ownership appuser au premier montage.
+RUN useradd -r -u 10001 appuser && mkdir -p /data && chown -R appuser /app /data
 USER appuser
 
 EXPOSE 8000
