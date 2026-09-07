@@ -59,15 +59,24 @@ En local, `COOKIE_SECURE=false` et `DEBUG=true` : le magic-link s'affiche dans l
 
 ## Déployer sur Coolify
 
-1. **Repo Git** → app Coolify « Dockerfile » (port 8000), comme `keyword-clustering`. Healthcheck : `/health`
-   (l'image embarque `curl`, le healthcheck Coolify fonctionne). Limite mémoire conseillée : 256 Mo.
-2. **Base** : créer une base `voice_skill` dans le Postgres Coolify existant (pas de nouvelle instance →
-   zéro RAM en plus) et renseigner `DATABASE_URL` (réseau interne `coolify`). Les tables sont créées au
-   démarrage.
-3. **Variables** : voir `.env.example`. Obligatoires : `SECRET_KEY`, `CRAWL4AI_TOKEN`, `LLM_API_KEY`,
-   `PUBLIC_BASE_URL`, `DATABASE_URL`. Email : `SMTP_*` (Brevo/Resend/Postmark en SMTP, offre gratuite
-   suffisante) — sans SMTP, le lien part dans les logs (inutilisable en prod).
-4. **Domaine** : ex. `voix.creapulse.fr` (DNS A → serveur) ; la landing sur creapulse.fr pointe dessus.
+État au 2026-09-07 : app **`brand-voice-skill-generator`** dans le projet « Mes outils », build pack Dockerfile,
+port 8000, healthcheck `/health` (l'image embarque `curl`). Repo privé lu via une deploy key dédiée
+(clé Coolify `voice-skill-deploy`, clé publique à déclarer en *Deploy key* lecture seule sur GitHub).
+
+1. **Chemin, pas de sous-domaine** : l'app est servie sous `https://www.creapulse.fr/outils/voix-de-marque`.
+   Coolify/Traefik route ce préfixe vers le conteneur (règle Host + PathPrefix, prioritaire sur WordPress) et
+   retire le préfixe (`stripprefix`). Côté app, `ROOT_PATH=/outils/voix-de-marque` sert à générer les liens,
+   cookies (`path`) et redirections. Aucun réglage WordPress nécessaire.
+2. **Store** : SQLite sur un volume persistant (`/data`, `DATABASE_URL=sqlite:////data/voice-skill.db`) —
+   zéro RAM, zéro base à créer ; 1 worker donc aucun souci de concurrence. Postgres reste possible en changeant
+   `DATABASE_URL` (tables créées au démarrage).
+3. **Variables** : voir `.env.example`. Secrets à saisir à la main dans Coolify : `CRAWL4AI_TOKEN`
+   (= `CRAWL4AI_API_TOKEN` de l'app crawl4ai) et `LLM_API_KEY` (clé créée dans le dashboard omniroute,
+   dédiée à cet outil pour suivre son coût). `SECRET_KEY` est générée au déploiement initial.
+4. **Email** : sans `SMTP_HOST`, mode **direct** — l'email est capturé (lead, consentement horodaté) et
+   l'accès débloqué tout de suite, sans lien de vérification. Avec `SMTP_*` renseignés (les mêmes
+   identifiants que WP Mail SMTP conviennent), mode **magic-link** : un lien de connexion est envoyé,
+   l'email est vérifié (`verified_at`). Le choix se fait uniquement par la présence des variables.
 5. Appels internes possibles via le réseau Docker `coolify` (`CRAWL4AI_URL=http://<container>:11235`,
    `LLM_BASE_URL=http://<container>:20128/api/v1`) pour éviter l'aller-retour public.
 

@@ -76,13 +76,30 @@ def test_ip_cap_blocks_cookie_clearing(client):
     assert r.status_code == 403 and r.json()["code"] == "need_email"
 
 
-def test_magic_link_flow_unlocks_verbatim_and_download(client):
+def test_direct_mode_without_smtp_unlocks_immediately(client):
+    assert settings.mail_mode == "direct"
+    r = client.post("/api/magic-link", json={"email": "jane@example.com", "consent": True})
+    assert r.status_code == 200 and r.json()["connected"] is True
+    assert gating.SESSION_COOKIE in r.cookies
+    lead = get_store().get_lead("jane@example.com")
+    assert lead["consent_at"] and lead["verified_at"] is None  # capturé, pas vérifié
+    r = client.post("/api/generate", json={"urls": ["https://example.org/a"], "verbatim": True})
+    assert r.status_code == 200 and r.json()["download_available"]
+
+
+def test_magic_link_flow_unlocks_verbatim_and_download(client, monkeypatch):
+    from app import main
+    sent = {}
+    monkeypatch.setattr(settings, "smtp_host", "smtp.example.com")
+    monkeypatch.setattr(main, "send_magic_link", lambda to, link: sent.update(to=to, link=link))
     r = client.post("/api/magic-link", json={"email": "jane@example.com", "consent": True})
     assert r.status_code == 200, r.text
-    link = r.json()["debug_link"]
-    r = client.get(link.replace(settings.public_base_url, ""), follow_redirects=False)
+    assert r.json()["connected"] is False and sent["to"] == "jane@example.com"
+    assert gating.SESSION_COOKIE not in r.cookies
+    r = client.get(sent["link"].replace(settings.public_base_url, ""), follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"] == "/?connected=1"
     assert gating.SESSION_COOKIE in r.cookies
+    assert get_store().get_lead("jane@example.com")["verified_at"]
 
     r = client.post("/api/generate", json={"urls": ["https://example.org/a", "https://example.org/b"], "verbatim": True})
     data = r.json()
@@ -123,3 +140,13 @@ def test_health_and_index(client):
     assert client.get("/health").json()["status"] == "ok"
     html = client.get("/").text
     assert "Générateur de skill de voix de marque IA" in html
+    assert 'href="/static/style.css"' in html and 'const ROOT = "";' in html
+
+
+def test_root_path_prefixes_links_and_redirects(client, monkeypatch):
+    monkeypatch.setattr(settings, "root_path", "/outils/voix-de-marque")
+    html = client.get("/").text
+    assert 'href="/outils/voix-de-marque/static/style.css"' in html
+    assert 'const ROOT = "/outils/voix-de-marque";' in html
+    r = client.get("/auth/verify?token=bad", follow_redirects=False)
+    assert r.headers["location"] == "/outils/voix-de-marque/?auth=invalid"

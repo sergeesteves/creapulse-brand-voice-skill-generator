@@ -33,6 +33,8 @@ class Settings:
     # --- Identité / URLs publiques ---
     app_name: str = "Générateur de skill de voix de marque IA"
     public_base_url: str = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
+    # Préfixe de chemin si l'app est servie sous un sous-dossier (ex. /outils/voix-de-marque) ; vide sinon.
+    root_path: str = ("/" + os.getenv("ROOT_PATH", "").strip("/")) if os.getenv("ROOT_PATH", "").strip("/") else ""
     cta_url: str = os.getenv("CTA_URL", "https://www.creapulse.fr/contact/")
     privacy_url: str = os.getenv("PRIVACY_URL", "https://www.creapulse.fr/politique-de-confidentialite/")
     debug: bool = _bool("DEBUG", False)
@@ -89,7 +91,12 @@ class Settings:
 
     @property
     def mail_mode(self) -> str:
-        return "smtp" if self.smtp_host else "log"
+        """smtp = magic-link envoyé par email (email vérifié) ; direct = email capturé sans vérification."""
+        return "smtp" if self.smtp_host else "direct"
+
+    @property
+    def cookie_path(self) -> str:
+        return self.root_path or "/"
 
     def validate(self) -> list[str]:
         """Retourne la liste des problèmes de config bloquants."""

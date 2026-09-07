@@ -57,7 +57,8 @@ async def lifespan(app: FastAPI):
     store.close()
 
 
-app = FastAPI(title=settings.app_name, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+app = FastAPI(title=settings.app_name, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan,
+              root_path=settings.root_path)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 
@@ -78,7 +79,7 @@ def client_ip(request: Request) -> str:
 
 def _set_cookie(resp: Response, name: str, value: str, max_age: int) -> None:
     resp.set_cookie(name, value, max_age=max_age, httponly=True, samesite="lax",
-                    secure=settings.cookie_secure, path="/")
+                    secure=settings.cookie_secure, path=settings.cookie_path)
 
 
 def _error(status: int, code: str, message: str, **extra: Any) -> JSONResponse:
@@ -102,6 +103,8 @@ async def index(request: Request):
         "index.html",
         {
             "settings": settings,
+            "root": settings.root_path,
+            "mail_mode": settings.mail_mode,
             "email": email,
             "anon_used": anon,
             "anon_free": settings.anon_free_generations,
@@ -235,6 +238,13 @@ async def api_magic_link(request: Request, payload: dict = Body(...)):
     if store.increment("magic", email) > 5:
         return _error(429, "rate_limited", "Trop de liens demandés pour cette adresse aujourd'hui.")
     store.upsert_lead(email, consent)
+    if settings.mail_mode == "direct":
+        # Pas de SMTP : l'email est capturé (lead) et l'accès débloqué immédiatement, sans vérification.
+        resp = JSONResponse({"ok": True, "connected": True,
+                             "message": "Merci ! Votre accès est débloqué, la page va se recharger."})
+        _set_cookie(resp, gating.SESSION_COOKIE, gating.sign_session(email), settings.session_ttl_s)
+        resp.delete_cookie(gating.ANON_COOKIE, path=settings.cookie_path)
+        return resp
     token = gating.make_magic_token(email)
     link = f"{settings.public_base_url}/auth/verify?token={token}"
     try:
@@ -242,8 +252,9 @@ async def api_magic_link(request: Request, payload: dict = Body(...)):
     except Exception as exc:
         log.error("mail send failed: %s", exc)
         return _error(503, "mail", "Impossible d'envoyer l'email pour le moment. Réessayez plus tard.")
-    body: dict[str, Any] = {"ok": True, "message": "Lien envoyé. Vérifiez votre boîte mail (et les spams)."}
-    if settings.mail_mode == "log" and settings.debug:
+    body: dict[str, Any] = {"ok": True, "connected": False,
+                            "message": "Lien envoyé. Vérifiez votre boîte mail (et les spams)."}
+    if settings.debug:
         body["debug_link"] = link
     return JSONResponse(body)
 
@@ -251,21 +262,22 @@ async def api_magic_link(request: Request, payload: dict = Body(...)):
 @app.get("/auth/verify")
 async def auth_verify(token: str = ""):
     email = gating.read_magic_token(token)
+    home = settings.root_path or ""
     if not email:
-        return RedirectResponse("/?auth=invalid", status_code=303)
+        return RedirectResponse(f"{home}/?auth=invalid", status_code=303)
     store = get_store()
     store.upsert_lead(email, consent=True)
     store.mark_verified(email)
-    resp = RedirectResponse("/?connected=1", status_code=303)
+    resp = RedirectResponse(f"{home}/?connected=1", status_code=303)
     _set_cookie(resp, gating.SESSION_COOKIE, gating.sign_session(email), settings.session_ttl_s)
-    resp.delete_cookie(gating.ANON_COOKIE, path="/")
+    resp.delete_cookie(gating.ANON_COOKIE, path=settings.cookie_path)
     return resp
 
 
 @app.post("/auth/logout")
 async def auth_logout():
     resp = JSONResponse({"ok": True})
-    resp.delete_cookie(gating.SESSION_COOKIE, path="/")
+    resp.delete_cookie(gating.SESSION_COOKIE, path=settings.cookie_path)
     return resp
 
 

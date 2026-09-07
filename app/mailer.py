@@ -28,8 +28,8 @@ def _message(to: str, link: str) -> EmailMessage:
 
 def send_magic_link(to: str, link: str) -> None:
     """Lève une exception si l'envoi SMTP échoue (le front affiche alors un message propre)."""
-    if settings.mail_mode == "log":
-        log.warning("MAIL_MODE=log — magic-link pour %s : %s", to, link)
+    if settings.mail_mode != "smtp":
+        log.warning("SMTP non configuré — magic-link non envoyé pour %s : %s", to, link)
         return
     msg = _message(to, link)
     if settings.smtp_port == 465:
