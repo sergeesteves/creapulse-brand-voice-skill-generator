@@ -156,3 +156,7 @@ def test_root_path_prefixes_links_and_redirects(client, monkeypatch):
     assert 'const ROOT = "/outils/voix-de-marque";' in html
     r = client.get("/auth/verify?token=bad", follow_redirects=False)
     assert r.headers["location"] == "/outils/voix-de-marque/?auth=invalid"
+    r = client.get("/static/style.css")
+    assert r.status_code == 200 and "text/css" in r.headers["content-type"]
+    assert client.get("/static/..%2Fmain.py").status_code == 404
+    assert client.get("/static/nope.css").status_code == 404

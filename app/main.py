@@ -13,8 +13,7 @@ from typing import Any
 
 import httpx
 from fastapi import Body, FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from . import gating, render
@@ -59,7 +58,16 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=settings.app_name, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan,
               root_path=settings.root_path)
-app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+STATIC_DIR = (BASE_DIR / "static").resolve()
+
+
+@app.get("/static/{filename}")
+async def static_file(filename: str):
+    """Fichiers statiques servis par une route explicite : fiable derrière un préfixe de chemin (ROOT_PATH)."""
+    target = (STATIC_DIR / filename).resolve()
+    if target.parent != STATIC_DIR or not target.is_file():
+        return _error(404, "not_found", "Fichier introuvable.")
+    return FileResponse(str(target), headers={"Cache-Control": "public, max-age=3600"})
 
 
 # ---------------------------------------------------------------------------
