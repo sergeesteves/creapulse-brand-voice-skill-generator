@@ -1,0 +1,14 @@
+<!-- À coller dans la landing WordPress (bloc « HTML personnalisé »), juste sous le hero.
+     Même origine (www.creapulse.fr) → cookies et appels fonctionnent dans l'iframe sans réglage. -->
+<iframe id="vsg-tool"
+        src="https://www.creapulse.fr/outils/voix-de-marque/?embed=1"
+        title="Générateur de skill de voix de marque IA"
+        style="width:100%;border:0;min-height:760px;display:block"
+        loading="lazy"></iframe>
+<script>
+  window.addEventListener('message', function (e) {
+    if (e.data && e.data.type === 'vsg-height') {
+      document.getElementById('vsg-tool').style.height = (e.data.height + 24) + 'px';
+    }
+  });
+</script>

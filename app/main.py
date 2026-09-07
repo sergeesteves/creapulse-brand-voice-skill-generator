@@ -105,6 +105,7 @@ async def index(request: Request):
             "settings": settings,
             "root": settings.root_path,
             "mail_mode": settings.mail_mode,
+            "embed": request.query_params.get("embed") == "1",
             "email": email,
             "anon_used": anon,
             "anon_free": settings.anon_free_generations,

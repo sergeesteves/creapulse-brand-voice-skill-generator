@@ -143,6 +143,12 @@ def test_health_and_index(client):
     assert 'href="/static/style.css"' in html and 'const ROOT = "";' in html
 
 
+def test_embed_mode_strips_chrome_and_reports_height(client):
+    html = client.get("/?embed=1").text
+    assert '<body class="embed">' in html and "const EMBED = true;" in html and "vsg-height" in html
+    assert '<body class="">' in client.get("/").text
+
+
 def test_root_path_prefixes_links_and_redirects(client, monkeypatch):
     monkeypatch.setattr(settings, "root_path", "/outils/voix-de-marque")
     html = client.get("/").text

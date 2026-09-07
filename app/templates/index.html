@@ -7,7 +7,7 @@
   <meta name="description" content="Collez jusqu'à 5 URLs d'articles que vous avez écrits : l'outil distille votre voix de marque en un profil réutilisable dans ChatGPT ou Claude (bloc prompt ou skill).">
   <link rel="stylesheet" href="{{ root }}/static/style.css">
 </head>
-<body>
+<body class="{% if embed %}embed{% endif %}">
 <header class="top">
   <a class="brand" href="https://www.creapulse.fr/">creapulse.fr</a>
   <div class="account">
@@ -29,6 +29,12 @@
     <p class="note">Pas de compte pour la première génération. Le contenu de vos pages n'est pas conservé : il est lu, distillé, puis oublié.</p>
   </section>
 
+  {% if embed %}
+  <div class="account-embed">
+    {% if email %}<span class="pill ok">Connecté : {{ email }}</span><button class="link" id="logout-embed">Se déconnecter</button>
+    {% else %}<span class="pill">{{ anon_free - anon_used if anon_free > anon_used else 0 }} génération gratuite sans email</span><button class="link" id="open-email-embed">Continuer avec mon email</button>{% endif %}
+  </div>
+  {% endif %}
   {% if connected %}<div class="flash ok">Email vérifié. Vous pouvez générer plusieurs profils, activer les extraits de style et télécharger le skill.</div>{% endif %}
   {% if auth_error %}<div class="flash err">Ce lien est invalide ou expiré. Redemandez-en un ci-dessous.</div>{% endif %}
 
@@ -135,6 +141,16 @@
 (function () {
   const MAX_URLS = {{ max_urls }};
   const ROOT = "{{ root }}";
+  const EMBED = {{ 'true' if embed else 'false' }};
+  const HOME = ROOT + '/' + (EMBED ? '?embed=1&' : '?');
+
+  // Mode embed (iframe dans la landing WordPress) : on transmet la hauteur au parent
+  if (EMBED && window.parent !== window) {
+    const sendHeight = () => window.parent.postMessage({ type: 'vsg-height', height: document.documentElement.scrollHeight }, '*');
+    new ResizeObserver(sendHeight).observe(document.body);
+    window.addEventListener('load', sendHeight);
+    sendHeight();
+  }
   const $ = (s) => document.querySelector(s);
   const urlList = $('#url-list');
   const form = $('#gen-form');
@@ -181,11 +197,15 @@
     modal.hidden = false; $('#email-input').focus();
   }
   $('#open-email') && $('#open-email').addEventListener('click', () => openEmail());
+  $('#open-email-embed') && $('#open-email-embed').addEventListener('click', () => openEmail());
+  $('#logout-embed') && $('#logout-embed').addEventListener('click', async () => {
+    await fetch(ROOT + '/auth/logout', { method: 'POST' }); location.href = HOME + 'out=1';
+  });
   $('#close-email').addEventListener('click', () => { modal.hidden = true; });
   modal.addEventListener('click', (e) => { if (e.target === modal) modal.hidden = true; });
 
   $('#logout') && $('#logout').addEventListener('click', async () => {
-    await fetch(ROOT + '/auth/logout', { method: 'POST' }); location.href = ROOT + '/';
+    await fetch(ROOT + '/auth/logout', { method: 'POST' }); location.href = HOME + 'out=1';
   });
 
   form.addEventListener('submit', async (e) => {
@@ -276,7 +296,7 @@
     if (data.debug_link) { msg.textContent += ' [DEBUG] ' + data.debug_link; }
     msg.classList.add(data.ok ? 'ok' : 'err');
     msg.hidden = false;
-    if (data.ok && data.connected) { setTimeout(() => { location.href = ROOT + '/?connected=1'; }, 1200); }
+    if (data.ok && data.connected) { setTimeout(() => { location.href = HOME + 'connected=1'; }, 1200); }
   });
 })();
 </script>
