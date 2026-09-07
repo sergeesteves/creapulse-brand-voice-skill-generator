@@ -117,6 +117,7 @@ def parse_guide(raw: str) -> tuple[str, dict[str, str], str]:
     summary = sections["Résumé en une phrase"].split("\n")[0]
     summary = re.sub(r"^[\-\*\s>]+", "", summary).replace("**", "")
     summary = re.split(r"\s+[—–-]\s+[«\"“]", summary)[0].strip()  # retire un éventuel « ancrage » cité
+    sections["Résumé en une phrase"] = summary  # la section = la phrase nue (le modèle ajoute parfois puce/gras)
     # Reconstruit un Markdown canonique (ordre garanti, titres propres)
     canonical = "\n\n".join(f"## {s}\n{sections[s]}" for s in SECTIONS)
     return canonical, sections, summary
