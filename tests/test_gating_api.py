@@ -140,7 +140,7 @@ def test_health_and_index(client):
     assert client.get("/health").json()["status"] == "ok"
     html = client.get("/").text
     assert "Générateur de skill de voix de marque IA" in html
-    assert 'href="/static/style.css"' in html and 'const ROOT = "";' in html
+    assert 'href="/static/style.css?v=' in html and 'const ROOT = "";' in html
 
 
 def test_embed_mode_strips_chrome_and_reports_height(client):
@@ -152,7 +152,7 @@ def test_embed_mode_strips_chrome_and_reports_height(client):
 def test_root_path_prefixes_links_and_redirects(client, monkeypatch):
     monkeypatch.setattr(settings, "root_path", "/outils/voix-de-marque")
     html = client.get("/").text
-    assert 'href="/outils/voix-de-marque/static/style.css"' in html
+    assert 'href="/outils/voix-de-marque/static/style.css?v=' in html
     assert 'const ROOT = "/outils/voix-de-marque";' in html
     r = client.get("/auth/verify?token=bad", follow_redirects=False)
     assert r.headers["location"] == "/outils/voix-de-marque/?auth=invalid"

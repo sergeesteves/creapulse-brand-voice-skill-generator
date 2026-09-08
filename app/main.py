@@ -59,6 +59,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title=settings.app_name, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan,
               root_path=settings.root_path)
 STATIC_DIR = (BASE_DIR / "static").resolve()
+# Version des statiques = empreinte du contenu → l'URL change à chaque déploiement, le cache navigateur ne colle plus
+import hashlib as _hashlib
+STATIC_VERSION = _hashlib.sha1(b"".join(p.read_bytes() for p in sorted(STATIC_DIR.glob("*")) if p.is_file())).hexdigest()[:10]
 
 
 @app.get("/static/{filename}")
@@ -112,6 +115,7 @@ async def index(request: Request):
         {
             "settings": settings,
             "root": settings.root_path,
+            "static_version": STATIC_VERSION,
             "mail_mode": settings.mail_mode,
             "embed": request.query_params.get("embed") == "1",
             "email": email,
