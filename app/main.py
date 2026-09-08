@@ -126,6 +126,7 @@ async def index(request: Request):
             "connected": request.query_params.get("connected") == "1",
             "auth_error": request.query_params.get("auth") == "invalid",
             "max_urls": settings.max_urls,
+            "min_urls": settings.min_urls,
             "min_words": settings.min_words_per_page,
         },
     )

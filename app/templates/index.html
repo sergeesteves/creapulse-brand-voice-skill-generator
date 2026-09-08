@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Générateur de skill de voix de marque IA — Creapulse</title>
-  <meta name="description" content="Collez jusqu'à 5 URLs d'articles que vous avez écrits : l'outil distille votre voix de marque en un profil réutilisable dans ChatGPT ou Claude (bloc prompt ou skill).">
+  <meta name="description" content="Collez {{ min_urls }} à {{ max_urls }} URLs d'articles que vous avez écrits : l'outil distille votre voix de marque en un profil réutilisable dans ChatGPT ou Claude (bloc prompt ou skill).">
   <link rel="stylesheet" href="{{ root }}/static/style.css?v={{ static_version }}">
 </head>
 <body class="{% if embed %}embed{% endif %}">
@@ -25,7 +25,7 @@
   <section class="hero">
     <p class="kicker">Outil gratuit</p>
     <h1>Générateur de skill de voix de marque IA</h1>
-    <p class="lead">Vous avez déjà une voix. Elle est dans vos articles. Collez 1 à 5 URLs de textes que <strong>vous</strong> avez écrits : l'outil en distille les règles (ton, phrases, vocabulaire, structure, positionnement) et vous rend un profil prêt à coller dans ChatGPT ou Claude — en bloc prompt, ou en skill.</p>
+    <p class="lead">Vous avez déjà une voix. Elle est dans vos articles. Collez {{ min_urls }} à {{ max_urls }} URLs de textes que <strong>vous</strong> avez écrits : l'outil en distille les règles (ton, phrases, vocabulaire, structure, positionnement) et vous rend un profil prêt à coller dans ChatGPT ou Claude — en bloc prompt, ou en skill.</p>
     <p class="note">Pas de compte pour la première génération. Le contenu de vos pages n'est pas conservé : il est lu, distillé, puis oublié.</p>
   </section>
 
@@ -40,11 +40,12 @@
 
   <section class="card" id="form-card">
     <h2>1. Vos articles</h2>
-    <p class="hint">URLs d'<strong>articles complets</strong> que vous avez rédigés (billets de blog, pages de fond). Pas de page d'accueil, de catégorie ni de page vitrine : il faut du texte, au moins {{ min_words }} mots par page. Plus les articles sont variés en sujets, plus le profil capte la mécanique de votre voix plutôt que ses thèmes.</p>
+    <p class="hint">{{ min_urls }} à {{ max_urls }} URLs d'<strong>articles complets</strong> que vous avez rédigés (billets de blog, pages de fond). Pas de page d'accueil, de catégorie ni de page vitrine : il faut du texte, au moins {{ min_words }} mots par page. Plus les articles sont variés en sujets, plus le profil capte la mécanique de votre voix plutôt que ses thèmes.</p>
     <form id="gen-form" autocomplete="off">
       <div id="url-list">
-        <input type="url" name="url" placeholder="https://votre-site.fr/votre-meilleur-article/" required>
-        <input type="url" name="url" placeholder="https://votre-site.fr/un-autre-article/">
+        {% for i in range(min_urls) %}
+        <input type="url" name="url" placeholder="https://votre-site.fr/{% if i == 0 %}votre-meilleur-article{% else %}un-autre-article-{{ i + 1 }}{% endif %}/" required>
+        {% endfor %}
       </div>
       <div class="row">
         <button type="button" class="ghost" id="add-url">+ Ajouter une URL (max {{ max_urls }})</button>
@@ -216,7 +217,7 @@
     e.preventDefault();
     errorBox.hidden = true;
     const urls = Array.from(urlList.querySelectorAll('input')).map(i => i.value.trim()).filter(Boolean);
-    if (!urls.length) { showError("Indiquez au moins une URL d'article."); return; }
+    if (urls.length < {{ min_urls }}) { showError("Indiquez au moins {{ min_urls }} articles différents : c'est le minimum pour une voix fiable."); return; }
     setBusy(true);
     try {
       const res = await fetch(ROOT + '/api/generate', {

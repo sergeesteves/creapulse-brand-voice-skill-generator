@@ -49,12 +49,25 @@ def test_word_count_and_truncate():
     assert word_count(t) == 120 and t.endswith("[…]")  # coupe à l'intérieur du 3e bloc
 
 
-def test_parse_urls_normalizes_and_dedupes():
+def test_parse_urls_normalizes_and_dedupes(monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "min_urls", 1)
     urls = parse_urls(["www.example.com/a", "https://www.example.com/a", "", "https://Example.com/b"])
     assert urls == ["https://www.example.com/a", "https://example.com/b"]
 
 
-def test_parse_urls_rejects_bad_inputs():
+def test_parse_urls_requires_min_urls():
+    from app.config import settings
+    assert settings.min_urls == 3
+    with pytest.raises(InputError) as exc:
+        parse_urls(["https://ex.fr/a", "https://ex.fr/b"])
+    assert "au moins 3" in str(exc.value)
+    assert len(parse_urls(["https://ex.fr/a", "https://ex.fr/b", "https://ex.fr/c"])) == 3
+
+
+def test_parse_urls_rejects_bad_inputs(monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "min_urls", 1)
     with pytest.raises(InputError):
         parse_urls([""])
     with pytest.raises(InputError):

@@ -26,8 +26,18 @@ def client(monkeypatch):
     monkeypatch.setattr(main, "fetch_pages", fake_fetch)
     monkeypatch.setattr(main, "distill", fake_distill)
     monkeypatch.setattr(main, "rate_limiter", gating.RateLimiter(1000))
+    monkeypatch.setattr(settings, "min_urls", 1)  # ces tests portent sur le gating, pas sur le nombre d'URLs
     with TestClient(main.app) as c:
         yield c
+
+
+def test_api_enforces_min_urls(client, monkeypatch):
+    monkeypatch.setattr(settings, "min_urls", 3)
+    r = client.post("/api/generate", json={"urls": ["https://example.org/a", "https://example.org/b"]})
+    assert r.status_code == 400 and "au moins 3" in r.json()["message"]
+    assert get_store().get("global", "all") == 0
+    html = client.get("/").text
+    assert html.count('type="url" name="url"') == 3 and "3 à 5 URLs" in html
 
 
 def test_store_counters_are_atomic_and_reversible():

@@ -60,6 +60,7 @@ class Settings:
     llm_max_output_tokens: int = _int("LLM_MAX_OUTPUT_TOKENS", 2500)
 
     # --- Garde-fous qualité d'entrée ---
+    min_urls: int = _int("MIN_URLS", 3)   # 3 articles = minimum pour une voix fiable (décision Serge, 2026-09-08)
     max_urls: int = _int("MAX_URLS", 5)
     min_words_per_page: int = _int("MIN_WORDS_PER_PAGE", 300)
     min_words_total: int = _int("MIN_WORDS_TOTAL", 600)

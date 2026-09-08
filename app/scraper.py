@@ -77,6 +77,9 @@ def parse_urls(raw_urls: list[str]) -> list[str]:
             seen.append(url)
     if not seen:
         raise InputError("Indiquez au moins une URL d'article que vous avez écrit.")
+    if len(seen) < settings.min_urls:
+        raise InputError(f"Indiquez au moins {settings.min_urls} articles différents : c'est le minimum pour "
+                         "distiller une voix fiable plutôt que le style d'un seul texte.")
     if len(seen) > settings.max_urls:
         raise InputError(f"Maximum {settings.max_urls} URLs.")
     return seen

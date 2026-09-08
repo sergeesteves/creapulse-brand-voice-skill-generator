@@ -8,6 +8,7 @@ os.environ.setdefault("LLM_API_KEY", "test-key")
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test-voice-skill.db")
 os.environ.setdefault("COOKIE_SECURE", "false")
 os.environ.setdefault("DEBUG", "true")
+os.environ.setdefault("MIN_URLS", "3")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
