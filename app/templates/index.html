@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="fr">
+<html lang="fr" class="{% if embed %}embed{% endif %}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -146,7 +146,8 @@
 
   // Mode embed (iframe dans la landing WordPress) : on transmet la hauteur au parent
   if (EMBED && window.parent !== window) {
-    const sendHeight = () => window.parent.postMessage({ type: 'vsg-height', height: document.documentElement.scrollHeight }, '*');
+    // Hauteur du CONTENU (body), pas de la fenêtre : documentElement.scrollHeight suit la taille de l'iframe et gonflerait à chaque message
+    const sendHeight = () => window.parent.postMessage({ type: 'vsg-height', height: Math.ceil(document.body.getBoundingClientRect().height) }, '*');
     new ResizeObserver(sendHeight).observe(document.body);
     window.addEventListener('load', sendHeight);
     sendHeight();

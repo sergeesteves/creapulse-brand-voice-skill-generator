@@ -5,6 +5,7 @@
   --sans: 'Open Sans', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 var(--sans); }
 a { color: var(--accent); }
 main { max-width: 860px; margin: 0 auto; padding: 0 20px 60px; }
@@ -63,7 +64,7 @@ footer { text-align: center; color: var(--muted); font-size: 13px; padding: 20px
 .close { position: absolute; top: 8px; right: 12px; background: none; border: 0; font-size: 24px; cursor: pointer; color: var(--muted); }
 @media (max-width: 600px) { .card { padding: 18px; } .hero { padding-top: 28px; } }
 /* Mode embed (iframe dans la landing) : que l'outil, pas l'habillage de page */
-body.embed { background: transparent; }
+html.embed, html.embed body { background: transparent; }
 body.embed .top, body.embed .hero, body.embed .faq, body.embed footer { display: none; }
 body.embed main { padding: 0 0 20px; max-width: none; }
 body.embed .card { margin: 0 0 16px; }
