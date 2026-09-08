@@ -137,7 +137,7 @@ class Gate:
             self._release(reserved)
             code = "need_email" if not email else "ip_cap"
             msg = ("Vous avez utilisé votre génération gratuite. Entrez votre email pour continuer "
-                   "(et débloquer l'option extraits + le téléchargement du skill)."
+                   "(et débloquer le téléchargement du skill)."
                    if not email else "Trop de générations depuis cette connexion aujourd'hui. Revenez demain.")
             return Decision(False, code, msg), []
 
@@ -157,7 +157,7 @@ class Gate:
             self._release(reserved)
             return Decision(False, "need_email",
                             "Vous avez utilisé votre génération gratuite. Entrez votre email pour continuer "
-                            "(et débloquer l'option extraits + le téléchargement du skill)."), []
+                            "(et débloquer le téléchargement du skill)."), []
         return Decision(True, "ok", anon_count=anon_count + 1), reserved
 
     def _release(self, reserved: list[tuple[str, str]]) -> None:

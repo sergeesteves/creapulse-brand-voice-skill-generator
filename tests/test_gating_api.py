@@ -83,11 +83,11 @@ def test_direct_mode_without_smtp_unlocks_immediately(client):
     assert gating.SESSION_COOKIE in r.cookies
     lead = get_store().get_lead("jane@example.com")
     assert lead["consent_at"] and lead["verified_at"] is None  # capturé, pas vérifié
-    r = client.post("/api/generate", json={"urls": ["https://example.org/a"], "verbatim": True})
+    r = client.post("/api/generate", json={"urls": ["https://example.org/a"]})
     assert r.status_code == 200 and r.json()["download_available"]
 
 
-def test_magic_link_flow_unlocks_verbatim_and_download(client, monkeypatch):
+def test_magic_link_flow_unlocks_download(client, monkeypatch):
     from app import main
     sent = {}
     monkeypatch.setattr(settings, "smtp_host", "smtp.example.com")
@@ -101,13 +101,18 @@ def test_magic_link_flow_unlocks_verbatim_and_download(client, monkeypatch):
     assert gating.SESSION_COOKIE in r.cookies
     assert get_store().get_lead("jane@example.com")["verified_at"]
 
-    r = client.post("/api/generate", json={"urls": ["https://example.org/a", "https://example.org/b"], "verbatim": True})
+    r = client.post("/api/generate", json={"urls": ["https://example.org/a", "https://example.org/b"]})
     data = r.json()
     assert r.status_code == 200 and data["connected"] and data["download_available"]
-    assert data["verbatim"]["applied"] and "## Extraits de style (verbatim)" in data["skill_md"]
+    assert "verbatim" not in data["skill_md"].lower().split("## ton")[0]  # plus d'option extraits
 
     r = client.post("/api/download/skill", json={"skill_md": data["skill_md"], "slug": data["slug"]})
     assert r.status_code == 200 and "attachment" in r.headers["content-disposition"]
+    r = client.post("/api/download/skill", json={"skill_md": data["skill_md"], "slug": data["slug"], "format": "zip"})
+    assert r.status_code == 200 and r.headers["content-type"] == "application/zip"
+    import io, zipfile
+    names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    assert names == ["voix-example/SKILL.md"]
     assert get_store().get_lead("jane@example.com")["generations"] == 1
 
 

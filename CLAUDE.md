@@ -21,7 +21,9 @@ Détails d'archi, fichiers, variables et déploiement : [README.md](./README.md)
   jamais de mention de l'archi interne (skill façade, n8n, pipeline).
 - **Le LLM ne produit que le guide 5 axes** (prompt dans `app/distill.py`). Tout l'enrobage est
   déterministe (`app/render.py`). Ne pas déplacer de logique de template vers le prompt.
-- **Verbatim = option**, jamais par défaut (risque de calquer le sujet plutôt que la mécanique).
+- **Pas d'extraits verbatim** dans l'artefact (option retirée le 2026-09-08 : complexité inutile, et risque de
+  calquer le sujet plutôt que la mécanique). Les règles explicites seules. Le verbatim reste l'argument du
+  « système complet » (upsell).
 - **Rien du contenu scrapé n'est stocké.** Le store ne contient que compteurs + leads.
 - Secrets uniquement en variables d'env Coolify. Ne jamais committer `.env`.
 - Repo sur Google Drive : avant toute opération git, `find .git -name desktop.ini -delete`.

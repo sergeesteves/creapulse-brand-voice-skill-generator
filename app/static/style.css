@@ -51,6 +51,9 @@ label.check.locked { color: var(--muted); }
 pre { background: #1e1f22; color: #f2f2f0; border-radius: 10px; padding: 16px; overflow: auto; max-height: 520px; font: 13px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word; }
 code { font-family: var(--mono); font-size: 90%; background: var(--bg); padding: 1px 5px; border-radius: 4px; }
 .usage { margin-top: 22px; }
+.usage h4 { margin: 14px 0 4px; font-size: 15px; }
+.usage ul { margin: 4px 0 0; padding-left: 20px; font-size: 15px; }
+.usage li { margin: 4px 0; }
 .usage h3, .cta h3 { margin: 0 0 8px; font-size: 18px; }
 .cta { margin-top: 22px; padding: 20px; background: var(--soft); border-radius: 10px; }
 .faq details { border-top: 1px solid var(--line); padding: 10px 0; }

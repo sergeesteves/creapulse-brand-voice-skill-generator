@@ -6,7 +6,6 @@ import unicodedata
 from urllib.parse import urlsplit
 
 from .config import settings
-from .scraper import PageText, _WORD_RE
 
 TOOL_NAME = "Générateur de skill de voix de marque IA"
 
@@ -41,54 +40,12 @@ def slugify(value: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Extraits verbatim (option) — sélection déterministe, sans LLM
-# ---------------------------------------------------------------------------
-
-def pick_excerpts(pages: list[PageText], max_excerpts: int = 2, min_chars: int = 350, max_chars: int = 900) -> list[tuple[str, str]]:
-    """1 paragraphe de prose par article (les plus « pleins »), 2 max, sur des articles différents."""
-    picked: list[tuple[str, str]] = []
-    for p in pages:
-        if not p.ok:
-            continue
-        candidates = []
-        for para in p.text.split("\n"):  # crawl4ai sépare les blocs par une seule ligne
-            para = para.strip()
-            if para.startswith("#") or para.startswith(("*", "-", "+", ">", "|", "`")):
-                continue
-            if not (min_chars <= len(para) <= max_chars):
-                continue
-            if len(_WORD_RE.findall(para)) < 50:
-                continue
-            candidates.append(para)
-        if candidates:
-            # Le plus long dans la fenêtre = le plus riche ; tri stable → déterministe
-            best = sorted(candidates, key=len, reverse=True)[0]
-            picked.append((p.title or p.url, best))
-        if len(picked) >= max_excerpts:
-            break
-    return picked
-
-
-def excerpts_section(excerpts: list[tuple[str, str]]) -> str:
-    if not excerpts:
-        return ""
-    lines = ["## Extraits de style (verbatim)",
-             "Ces extraits illustrent la MÉCANIQUE de la voix (rythme, adresse au lecteur, tournures). "
-             "S'en inspirer pour le style, jamais pour le sujet ; ne pas les recopier.", ""]
-    for i, (title, text) in enumerate(excerpts, 1):
-        lines.append(f"**Extrait {i}** — {title}")
-        lines.append("> " + text.replace("\n", "\n> "))
-        lines.append("")
-    return "\n".join(lines).strip()
-
-
-# ---------------------------------------------------------------------------
 # Templates B1 / B2
 # ---------------------------------------------------------------------------
 
 USAGE_BLOCK = """> **Comment l'utiliser**
-> - **ChatGPT** : collez ce bloc dans *Instructions personnalisées* (ou dans les instructions d'un GPT).
-> - **Claude** : créez un *Projet* et collez-le dans les instructions du projet (ou en début de conversation).
+> - **ChatGPT** : collez ce bloc dans les instructions d'un *Projet* ou d'un *GPT* (ou dans *Instructions personnalisées* pour toutes vos conversations).
+> - **Claude** : créez un *Projet* et collez-le dans ses instructions (ou importez la version « skill » dans Paramètres → Skills).
 > - Il définit COMMENT écrire, pas QUOI écrire : donnez ensuite votre sujet normalement."""
 
 

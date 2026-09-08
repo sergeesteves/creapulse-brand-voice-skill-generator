@@ -5,8 +5,10 @@ Gating : 1 génération anonyme, puis email (magic-link) ; caps compte / IP / gl
 """
 from __future__ import annotations
 
+import io
 import logging
 import secrets
+import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -151,7 +153,6 @@ async def api_generate(request: Request, payload: dict = Body(...)):
     raw_urls = payload.get("urls") or []
     if not isinstance(raw_urls, list) or len(raw_urls) > 20:
         return _error(400, "bad_request", "Format d'entrée invalide.")
-    want_verbatim = bool(payload.get("verbatim"))
     try:
         urls = parse_urls([str(u)[:2048] for u in raw_urls])
     except InputError as exc:
@@ -189,16 +190,8 @@ async def api_generate(request: Request, payload: dict = Body(...)):
         log.exception("generate failed: %s", exc)
         return _error(500, "internal", "Erreur inattendue. Réessayez plus tard.")
 
-    verbatim_allowed = bool(email)
-    extra = ""
-    excerpts_count = 0
-    if want_verbatim and verbatim_allowed:
-        excerpts = render.pick_excerpts(good)
-        extra = render.excerpts_section(excerpts)
-        excerpts_count = len(excerpts)
-
-    prompt_block = render.render_prompt_block(name, guide.markdown, extra)
-    skill_md = render.render_skill(name, slug, guide.summary, guide.markdown, extra)
+    prompt_block = render.render_prompt_block(name, guide.markdown)
+    skill_md = render.render_skill(name, slug, guide.summary, guide.markdown)
 
     if email:
         store.bump_lead_generations(email)
@@ -216,8 +209,6 @@ async def api_generate(request: Request, payload: dict = Body(...)):
         "skill_md": skill_md,
         "skill_filename": render.skill_filename(slug),
         "pages": [_page_view(p) for p in pages],
-        "verbatim": {"requested": want_verbatim, "applied": excerpts_count > 0, "count": excerpts_count,
-                     "available": verbatim_allowed},
         "download_available": bool(email),
         "connected": bool(email),
         "cta_url": settings.cta_url,
@@ -307,6 +298,13 @@ async def api_download_skill(request: Request, payload: dict = Body(...)):
     if not content.startswith("---\nname: voix-") or len(content) > 60_000:
         return _error(400, "bad_request", "Contenu invalide.")
     slug = render.slugify(str(payload.get("slug") or "ma-marque")) or "ma-marque"
+    if str(payload.get("format") or "md") == "zip":
+        # Archive prête à importer dans Claude (Paramètres → Skills) : un dossier voix-<slug>/SKILL.md
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(f"voix-{slug}/SKILL.md", content)
+        return Response(buf.getvalue(), media_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="voix-{slug}.zip"'})
     filename = render.skill_filename(slug)
     return Response(content, media_type="text/markdown; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})

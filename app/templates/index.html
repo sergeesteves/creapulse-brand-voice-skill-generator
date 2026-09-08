@@ -35,7 +35,7 @@
     {% else %}<span class="pill">{{ anon_free - anon_used if anon_free > anon_used else 0 }} génération gratuite sans email</span><button class="link" id="open-email-embed">Continuer avec mon email</button>{% endif %}
   </div>
   {% endif %}
-  {% if connected %}<div class="flash ok">Email vérifié. Vous pouvez générer plusieurs profils, activer les extraits de style et télécharger le skill.</div>{% endif %}
+  {% if connected %}<div class="flash ok">Email vérifié. Vous pouvez générer plusieurs profils et télécharger le skill.</div>{% endif %}
   {% if auth_error %}<div class="flash err">Ce lien est invalide ou expiré. Redemandez-en un ci-dessous.</div>{% endif %}
 
   <section class="card" id="form-card">
@@ -49,12 +49,7 @@
       <div class="row">
         <button type="button" class="ghost" id="add-url">+ Ajouter une URL (max {{ max_urls }})</button>
       </div>
-      <label class="check {% if not email %}locked{% endif %}" title="{% if not email %}Réservé aux comptes avec email vérifié{% endif %}">
-        <input type="checkbox" id="verbatim" {% if not email %}disabled{% endif %}>
-        Inclure 1-2 extraits de style (verbatim) dans le profil
-        {% if not email %}<span class="tag">email requis</span>{% endif %}
-      </label>
-      <p class="hint small">Par défaut, le profil ne contient que des règles explicites : c'est plus robuste, un LLM ne calque pas le sujet d'un extrait. Pour plus de fidélité sans l'option, ajoutez vous-même votre meilleur article en exemple dans votre conversation.</p>
+      <p class="hint small">Le profil ne contient que des règles explicites, ancrées sur vos textes : c'est ce qui se transfère le mieux à un nouveau sujet. Pour plus de fidélité, ajoutez vous-même votre meilleur article en exemple dans votre conversation.</p>
       <div class="row">
         <button type="submit" class="primary" id="submit">Distiller ma voix</button>
         <span id="progress" class="progress" hidden><span class="spinner"></span> <span id="progress-text">Lecture des pages…</span></span>
@@ -83,7 +78,8 @@
       <p class="hint">Format avancé, autonome (tout est dedans). À déposer tel quel dans <code>~/.claude/skills/voix-&lt;marque&gt;/SKILL.md</code> pour Claude Code, ou tout runtime compatible.</p>
       <div class="toolbar">
         <button class="ghost copy" data-target="out-skill">Copier</button>
-        <button class="ghost" id="download-skill">Télécharger SKILL.md</button>
+        <button class="ghost dl" id="download-skill-zip" data-format="zip">Télécharger pour Claude (.zip)</button>
+        <button class="ghost dl" id="download-skill" data-format="md">Télécharger SKILL.md</button>
         <span class="tag" id="download-lock" hidden>email requis</span>
       </div>
       <pre id="out-skill"></pre>
@@ -91,12 +87,19 @@
 
     <div class="usage">
       <h3>Comment l'utiliser</h3>
+      <p class="hint">Le profil dit COMMENT écrire, pas QUOI écrire. Une fois en place, donnez simplement votre sujet.</p>
+      <h4>Dans ChatGPT</h4>
       <ul>
-        <li><strong>ChatGPT</strong> : collez le bloc dans <em>Instructions personnalisées</em> (ou créez un GPT et mettez-le dans ses instructions).</li>
-        <li><strong>Claude</strong> : créez un <em>Projet</em> et collez le bloc dans les instructions du projet (ou en début de conversation).</li>
-        <li><strong>Skill</strong> (avancé, Claude Code et runtimes compatibles) : déposez le <code>SKILL.md</code> dans <code>~/.claude/skills/</code>.</li>
+        <li><strong>Pour un espace de travail dédié</strong> : créez un <em>Projet</em> (barre latérale → Projets → Nouveau projet), ouvrez ses <em>Instructions</em> et collez le bloc prompt. Toutes les conversations du projet écriront dans votre voix.</li>
+        <li><strong>Pour un assistant partageable</strong> : <em>Explorer les GPT → Créer</em>, onglet <em>Configurer</em>, collez le bloc dans <em>Instructions</em>. Vous pouvez aussi joindre le fichier <code>SKILL.md</code> dans <em>Connaissances</em>, en plus.</li>
+        <li><strong>Pour toutes vos conversations</strong> : <em>Paramètres → Personnalisation → Instructions personnalisées</em>, collez le bloc dans « Comment ChatGPT doit-il répondre ? ».</li>
       </ul>
-      <p class="hint">Le profil dit COMMENT écrire, pas QUOI écrire. Donnez ensuite votre sujet normalement.</p>
+      <h4>Dans Claude</h4>
+      <ul>
+        <li><strong>Skill (recommandé)</strong> : téléchargez le <em>.zip</em> ci-dessus, puis dans Claude (app ou claude.ai) : <em>Paramètres → Capacités (Capabilities) → Skills → Importer / Upload skill</em> et choisissez le zip. Claude chargera la voix tout seul dès qu'une tâche de rédaction s'y prête.</li>
+        <li><strong>Projet</strong> : créez un <em>Projet</em> et collez le bloc prompt dans ses instructions (ou en début de conversation).</li>
+        <li><strong>Claude Code</strong> : dézippez dans <code>~/.claude/skills/</code> (vous obtenez <code>~/.claude/skills/voix-&lt;marque&gt;/SKILL.md</code>).</li>
+      </ul>
     </div>
 
     <div class="cta">
@@ -125,7 +128,7 @@
   <div class="modal-box">
     <button class="close" id="close-email" aria-label="Fermer">×</button>
     <h3>Continuer avec votre email</h3>
-    <p id="email-reason">Votre génération gratuite est utilisée. Entrez votre email : {% if mail_mode == "smtp" %}vous recevez un lien d'accès qui débloque{% else %}il débloque immédiatement{% endif %} des générations supplémentaires, l'option extraits de style et le téléchargement du skill.</p>
+    <p id="email-reason">Votre génération gratuite est utilisée. Entrez votre email : {% if mail_mode == "smtp" %}vous recevez un lien d'accès qui débloque{% else %}il débloque immédiatement{% endif %} des générations supplémentaires et le téléchargement du skill.</p>
     <form id="email-form">
       <input type="email" id="email-input" placeholder="vous@votre-domaine.fr" required>
       <label class="check"><input type="checkbox" id="consent" required> J'accepte que Creapulse conserve mon email pour m'envoyer ce lien d'accès et, éventuellement, me recontacter au sujet de mes contenus. Pas de newsletter, pas de revente. <a href="{{ settings.privacy_url }}" target="_blank" rel="noopener">Confidentialité</a>.</label>
@@ -218,7 +221,7 @@
     try {
       const res = await fetch(ROOT + '/api/generate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ urls, verbatim: $('#verbatim').checked })
+        body: JSON.stringify({ urls })
       });
       const data = await res.json();
       if (!data.ok) {
@@ -248,12 +251,7 @@
     $('#out-prompt').textContent = data.prompt_block;
     $('#out-skill').textContent = data.skill_md;
     $('#download-lock').hidden = data.download_available;
-    $('#download-skill').disabled = !data.download_available;
-    if (data.verbatim.requested && !data.verbatim.applied) {
-      const li = document.createElement('li'); li.className = 'info';
-      li.textContent = data.verbatim.available ? 'Aucun extrait assez long pour être cité.' : 'Extraits de style non inclus : option réservée aux comptes avec email vérifié.';
-      ul.appendChild(li);
-    }
+    document.querySelectorAll('.dl').forEach(b => { b.disabled = !data.download_available; });
     result.hidden = false;
     result.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
@@ -271,19 +269,20 @@
     setTimeout(() => { btn.textContent = 'Copier'; }, 2000);
   }));
 
-  $('#download-skill').addEventListener('click', async () => {
+  document.querySelectorAll('.dl').forEach(btn => btn.addEventListener('click', async () => {
     if (!lastData) return;
-    if (!lastData.download_available) { openEmail('Le téléchargement du skill est réservé aux comptes avec email vérifié. Entrez votre email pour recevoir un lien d\'accès.'); return; }
+    if (!lastData.download_available) { openEmail('Le téléchargement du skill est réservé aux comptes avec email. Entrez votre email pour le débloquer.'); return; }
+    const format = btn.dataset.format;
     const res = await fetch(ROOT + '/api/download/skill', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ skill_md: lastData.skill_md, slug: lastData.slug })
+      body: JSON.stringify({ skill_md: lastData.skill_md, slug: lastData.slug, format })
     });
     if (!res.ok) { const d = await res.json().catch(() => ({})); if (d.code === 'need_email') openEmail(d.message); return; }
     const blob = await res.blob();
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = lastData.skill_filename; a.click();
+    a.href = URL.createObjectURL(blob); a.download = format === 'zip' ? ('voix-' + lastData.slug + '.zip') : lastData.skill_filename; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  });
+  }));
 
   $('#email-form').addEventListener('submit', async (e) => {
     e.preventDefault();

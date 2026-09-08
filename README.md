@@ -21,7 +21,7 @@ visiteur ──> FastAPI (1 worker, ~80 Mo)
                │  2. gating (anonyme ×1 → email magic-link ; caps compte / IP / global)
                ├──> crawl4ai (existant) : POST /crawl → markdown "fit" → nettoyage + seuils de mots
                ├──> omniroute (existant) : POST /chat/completions, T° 0.2 → guide 5 axes (Markdown)
-               │  3. enrobage déterministe → prompt universel + SKILL.md (+ extraits verbatim en option)
+               │  3. enrobage déterministe → prompt universel + SKILL.md (téléchargeable en .md ou .zip importable dans Claude)
                └──> Postgres minuscule : usage_counters (day, scope, key, count) + leads (email…)
 ```
 
@@ -39,7 +39,7 @@ visiteur ──> FastAPI (1 worker, ~80 Mo)
 | `app/main.py` | routes : `/`, `/api/generate`, `/api/magic-link`, `/auth/verify`, `/api/download/skill`, `/health` |
 | `app/scraper.py` | appel crawl4ai, nettoyage du Markdown (TOC, partage, cookies, méta), garde-fous qualité |
 | `app/distill.py` | prompt de distillation, appel omniroute, parsing strict des 6 sections (1 relance max) |
-| `app/render.py` | nom/slug depuis le domaine, templates prompt universel + SKILL.md, extraits verbatim |
+| `app/render.py` | nom/slug depuis le domaine, templates prompt universel + SKILL.md |
 | `app/gating.py` | cookies signés, magic-link (itsdangerous), rate-limit, décision + réservation de slot |
 | `app/store.py` | 2 tables (Postgres ou SQLite), incréments atomiques `ON CONFLICT … RETURNING` |
 | `app/mailer.py` | envoi SMTP du magic-link (ou mode log si `SMTP_HOST` vide) |

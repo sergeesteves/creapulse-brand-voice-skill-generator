@@ -1,9 +1,7 @@
 import pytest
 
 from app.distill import DistillError, parse_guide
-from app.render import (brand_from_urls, excerpts_section, pick_excerpts, render_prompt_block,
-                        render_skill, slugify)
-from app.scraper import PageText
+from app.render import brand_from_urls, render_prompt_block, render_skill, slugify
 
 GUIDE = """```markdown
 ## Ton
@@ -71,15 +69,3 @@ def test_render_templates_are_self_contained():
     assert "\n---\n\n# Voix de marque — Creapulse" in skill
 
 
-def test_pick_excerpts_is_deterministic_and_prose_only():
-    prose = ("Bon, pour faire simple, voici une phrase de prose assez longue qui compte des mots utiles pour la voix "
-             "éditoriale du site et qui continue encore un peu pour dépasser le seuil minimum de caractères requis. ") * 3
-    page = PageText("https://ex.fr/a", "Article A", "## Titre\n\n* puce\n\n" + prose.strip() + "\n\nCourt.", 200, True)
-    page2 = PageText("https://ex.fr/b", "Article B", prose.strip(), 200, True)
-    ex1 = pick_excerpts([page, page2])
-    ex2 = pick_excerpts([page, page2])
-    assert ex1 == ex2 and len(ex1) == 2
-    assert ex1[0][0] == "Article A" and not ex1[0][1].startswith("#")
-    section = excerpts_section(ex1)
-    assert section.startswith("## Extraits de style (verbatim)") and "**Extrait 2**" in section
-    assert excerpts_section([]) == ""
