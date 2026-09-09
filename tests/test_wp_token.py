@@ -71,6 +71,43 @@ def test_index_consumes_token_sets_member_session_and_redirects(client):
     assert client.get("/").headers["referrer-policy"] == "no-referrer"
 
 
+def test_valid_token_declares_usage_to_wordpress_in_background(client, monkeypatch):
+    import httpx
+    from app import main
+    calls = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls.append(req)
+        return httpx.Response(200, json={"recorded": True}, headers={"content-type": "application/json"})
+
+    monkeypatch.setattr(main.app.state, "http", httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    r = client.get(f"/?embed=1&wp_token={REF_TOKEN}", follow_redirects=False)
+    assert r.status_code == 302
+    assert len(calls) == 1
+    req = calls[0]
+    assert req.method == "POST" and str(req.url) == settings.wp_tool_event_url and not req.url.query
+    body = json.loads(req.content)
+    assert body == {"wp_token": REF_TOKEN, "tool": "voix-de-marque"}
+    assert req.headers["content-type"] == "application/json"
+    # jeton invalide → aucun appel ; visiteur anonyme → aucun appel
+    client.get(f"/?embed=1&wp_token={REF_TOKEN[:-2]}xx", follow_redirects=False)
+    client.get("/?embed=1")
+    assert len(calls) == 1
+
+
+def test_tool_event_failure_never_breaks_the_response(client, monkeypatch, caplog):
+    import httpx
+    from app import main
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectTimeout("timeout")
+
+    monkeypatch.setattr(main.app.state, "http", httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    r = client.get(f"/?embed=1&wp_token={REF_TOKEN}", follow_redirects=False)
+    assert r.status_code == 302 and gating.SESSION_COOKIE in r.cookies
+    assert REF_TOKEN not in caplog.text  # le jeton n'est jamais loggé
+
+
 def test_bad_token_is_ignored_not_500(client):
     r = client.get(f"/?embed=1&wp_token={REF_TOKEN[:-3]}zzz", follow_redirects=False)
     assert r.status_code == 302 and gating.SESSION_COOKIE not in r.cookies

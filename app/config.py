@@ -50,6 +50,10 @@ class Settings:
     )
     member_session_ttl_s: int = _int("MEMBER_SESSION_TTL_S", 8 * 3600)   # session courte : suit la déconnexion WP
     wp_site_prefix: str = os.getenv("WP_SITE_PREFIX", "https://www.creapulse.fr/")  # allowlist des login_url/register_url
+    # Déclaration d'usage à WordPress (creapulse-tools `tool-event` → Nimble). URL vide = désactivé.
+    wp_tool_event_url: str = os.getenv("WP_TOOL_EVENT_URL", "https://www.creapulse.fr/wp-json/creapulse-tools/v1/tool-event").strip()
+    tool_slug: str = os.getenv("TOOL_SLUG", "voix-de-marque").strip()
+    wp_tool_event_timeout_s: float = _float("WP_TOOL_EVENT_TIMEOUT_S", 3.0)
 
     # --- Store (Postgres en prod, SQLite en dev/tests) ---
     database_url: str = os.getenv("DATABASE_URL", "sqlite:///./voice-skill.db")

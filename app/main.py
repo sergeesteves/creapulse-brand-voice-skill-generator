@@ -18,6 +18,7 @@ import httpx
 from fastapi import Body, FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
+from starlette.background import BackgroundTask
 
 from . import gating, render
 from . import wp_token as wp_token_mod
@@ -26,6 +27,7 @@ from .distill import DistillError, distill
 from .mailer import send_magic_link
 from .scraper import InputError, ScrapeError, check_corpus, fetch_pages, parse_urls
 from .store import get_store
+from .wp_events import notify_tool_event
 
 log = logging.getLogger("voice-skill")
 logging.basicConfig(level=logging.DEBUG if settings.debug else logging.INFO,
@@ -151,6 +153,8 @@ async def index(request: Request):
                         settings.member_session_ttl_s)
             resp.delete_cookie(gating.ANON_COOKIE, path=settings.cookie_path)
             log.info("wp token ok user=%s levels=%s", ident.user_id, list(ident.levels))
+            # Déclare l'usage à WordPress (→ Nimble) APRÈS l'envoi de la réponse : jamais bloquant, jeton encore valide
+            resp.background = BackgroundTask(notify_tool_event, request.app.state.http, wp_token)
         else:
             log.warning("wp token rejeté (signature/expiration/format) — comportement anonyme")
         return resp
