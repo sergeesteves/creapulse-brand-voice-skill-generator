@@ -6,6 +6,7 @@ Le contenu scrapé ne vit qu'en mémoire, le temps de la requête.
 from __future__ import annotations
 
 import ipaddress
+import logging
 import re
 import socket
 from dataclasses import dataclass, field
@@ -163,11 +164,11 @@ def clean_markdown(md: str) -> str:
             continue
         if not seen_prose:
             if stripped.startswith("#"):
-                seen_prose = True
-            elif stripped.startswith(("*", "-", "+")) or len(_WORD_RE.findall(_strip_links(stripped))) < 20:
+                out.append(_strip_links(line))  # le titre est gardé, mais n'ouvre pas le corps (nav de série après H1)
                 continue
-            else:
-                seen_prose = True
+            if stripped.startswith(("*", "-", "+")) or len(_WORD_RE.findall(_strip_links(stripped))) < 20:
+                continue
+            seen_prose = True
         # Sommaire : on saute le titre et la liste de liens qui suit
         if _TOC_HEAD.match(stripped):
             in_toc = True
@@ -302,51 +303,109 @@ class ScrapeError(RuntimeError):
     """Panne côté scraper (pas une erreur du visiteur)."""
 
 
+log = logging.getLogger("voice-skill.scraper")
+
+_DIRECT_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/128.0 Safari/537.36 creapulse-voice-skill",
+    "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.7",
+}
+_DIRECT_MAX_BYTES = 5 * 1024 * 1024
+
+
+async def fetch_direct(url: str, client: httpx.AsyncClient) -> PageText:
+    """Repli sans crawl4ai : GET direct + extraction d'article (trafilatura). Utilisé quand crawl4ai est en panne
+    (proxy en 402/timeout, service indisponible). Même garde-fous ensuite (assess_page)."""
+    try:
+        resp = await client.get(url, headers=_DIRECT_HEADERS, follow_redirects=True, timeout=settings.direct_timeout_s)
+    except httpx.HTTPError as exc:
+        return PageText(url, "", "", 0, False, f"page inaccessible ({exc.__class__.__name__})")
+    if resp.status_code >= 400:
+        return assess_page(url, resp.status_code, False, "", "", "")
+    ctype = resp.headers.get("content-type", "")
+    if "html" not in ctype and "xml" not in ctype:
+        return PageText(url, "", "", 0, False, "ce n'est pas une page HTML")
+    html = resp.content[:_DIRECT_MAX_BYTES].decode(resp.encoding or "utf-8", errors="replace")
+    try:
+        import trafilatura  # import tardif : dépendance du repli uniquement
+        text = trafilatura.extract(html, url=url, include_links=False, include_formatting=True, include_tables=False,
+                                   output_format="markdown", favor_recall=False) or ""
+        meta = trafilatura.extract_metadata(html, default_url=url)
+        title = (meta.title if meta and meta.title else "") or ""
+        language = (meta.language if meta and getattr(meta, "language", None) else "") or ""
+    except Exception as exc:  # pragma: no cover — extraction impossible → page refusée proprement
+        log.warning("extraction directe KO %s : %s", url, exc.__class__.__name__)
+        return PageText(url, "", "", 0, False, "extraction impossible")
+    return assess_page(url, resp.status_code, True, "", title, text, language[:8])
+
+
+def _is_network_failure(r: dict) -> bool:
+    """Résultat crawl4ai sans réponse HTTP (proxy, tunnel, timeout, navigation) — pas un vrai 4xx/5xx de la page."""
+    if not r:
+        return True
+    if r.get("success"):
+        return False
+    return r.get("status_code") in (None, 0)
+
+
 async def fetch_pages(urls: list[str], client: httpx.AsyncClient | None = None) -> list[PageText]:
     own = client is None
     client = client or httpx.AsyncClient(timeout=settings.crawl_timeout_s)
     try:
-        resp = await client.post(
-            f"{settings.crawl4ai_url}/crawl",
-            json=_crawl_payload(urls),
-            headers={"Authorization": f"Bearer {settings.crawl4ai_token}"},
-            timeout=settings.crawl_timeout_s,
-        )
-    except httpx.HTTPError as exc:  # réseau / timeout
-        raise ScrapeError(f"crawl4ai injoignable : {exc.__class__.__name__}") from exc
+        by_url: dict[str, dict] = {}
+        crawl_failed = ""
+        try:
+            resp = await client.post(
+                f"{settings.crawl4ai_url}/crawl",
+                json=_crawl_payload(urls),
+                headers={"Authorization": f"Bearer {settings.crawl4ai_token}"},
+                timeout=settings.crawl_timeout_s,
+            )
+            if resp.status_code != 200:
+                crawl_failed = f"HTTP {resp.status_code}"
+            else:
+                try:
+                    data = resp.json()
+                    for r in data.get("results", []) or []:
+                        by_url[(r.get("url") or "").rstrip("/")] = r
+                except ValueError:
+                    crawl_failed = "réponse illisible"
+        except httpx.HTTPError as exc:  # réseau / timeout
+            crawl_failed = exc.__class__.__name__
+        if crawl_failed:
+            log.warning("crawl4ai indisponible (%s) → repli extraction directe", crawl_failed)
+
+        pages: list[PageText] = []
+        for url in urls:
+            r = by_url.get(url.rstrip("/")) or {}
+            if settings.direct_fallback and (crawl_failed or _is_network_failure(r)):
+                if r:
+                    log.warning("crawl4ai KO pour %s (%s) → repli extraction directe", url,
+                                (r.get("error_message") or "")[:80].replace("\n", " "))
+                pages.append(await fetch_direct(url, client))
+                continue
+            md = r.get("markdown") or {}
+            if isinstance(md, str):
+                raw_md = md
+            else:
+                raw_md = md.get("fit_markdown") or md.get("raw_markdown") or ""
+            meta = r.get("metadata") or {}
+            pages.append(
+                assess_page(
+                    url=url,
+                    status_code=r.get("status_code"),
+                    success=bool(r.get("success")) if r else False,
+                    error=r.get("error_message") or ("aucun résultat" if not r else ""),
+                    title=meta.get("title") or "",
+                    raw_md=raw_md,
+                    language=(meta.get("language") or "")[:8],
+                )
+            )
+        return pages
     finally:
         if own:
             await client.aclose()
-    if resp.status_code != 200:
-        raise ScrapeError(f"crawl4ai a répondu HTTP {resp.status_code}")
-    try:
-        data = resp.json()
-    except ValueError as exc:
-        raise ScrapeError("réponse crawl4ai illisible") from exc
-    by_url: dict[str, dict] = {}
-    for r in data.get("results", []) or []:
-        by_url[(r.get("url") or "").rstrip("/")] = r
-    pages: list[PageText] = []
-    for url in urls:
-        r = by_url.get(url.rstrip("/")) or {}
-        md = r.get("markdown") or {}
-        if isinstance(md, str):
-            raw_md = md
-        else:
-            raw_md = md.get("fit_markdown") or md.get("raw_markdown") or ""
-        meta = r.get("metadata") or {}
-        pages.append(
-            assess_page(
-                url=url,
-                status_code=r.get("status_code"),
-                success=bool(r.get("success")) if r else False,
-                error=r.get("error_message") or ("aucun résultat" if not r else ""),
-                title=meta.get("title") or "",
-                raw_md=raw_md,
-                language=(meta.get("language") or "")[:8],
-            )
-        )
-    return pages
 
 
 def check_corpus(pages: list[PageText]) -> list[PageText]:

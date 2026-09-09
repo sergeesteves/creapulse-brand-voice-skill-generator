@@ -63,6 +63,9 @@ class Settings:
     crawl4ai_token: str = os.getenv("CRAWL4AI_TOKEN", "")
     crawl_timeout_s: float = _float("CRAWL_TIMEOUT_S", 90.0)
     crawl_page_timeout_ms: int = _int("CRAWL_PAGE_TIMEOUT_MS", 45000)
+    # Repli si crawl4ai est en panne (proxy 402, tunnel, timeout) : GET direct + trafilatura
+    direct_fallback: bool = _bool("DIRECT_FALLBACK", True)
+    direct_timeout_s: float = _float("DIRECT_TIMEOUT_S", 20.0)
 
     # --- LLM via omniroute (OpenAI-compatible) ---
     llm_base_url: str = os.getenv("LLM_BASE_URL", "https://omniroute.creapulse.fr/api/v1").rstrip("/")
