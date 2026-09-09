@@ -85,6 +85,25 @@ négligeable (1 worker uvicorn, aucun modèle en RAM, pool Postgres `min_size=0`
 requis, le code est portable tel quel vers un runtime serverless (Cloud Run, Fly machines) — rien
 dans l'app ne dépend de Coolify.
 
+## Identité WordPress (membres Paid Memberships Pro)
+
+Depuis le 2026-09-09, la landing embarque l'outil via le shortcode du plugin creapulse-tools
+(`[creapulse_tool src="…/?embed=1" access="optional" register_level="1"]`). Le plugin ajoute au `src` soit un
+**jeton signé** (`wp_token`, HMAC-SHA256, 10 min) pour un visiteur connecté, soit `login_url` / `register_url`
+pour un anonyme. Côté app (`app/wp_token.py`, `app/main.py`) :
+
+- jeton valide → session **membre** (cookie signé, `source=wordpress`, niveaux PMPro, TTL `MEMBER_SESSION_TTL_S`
+  = 8 h), lead marqué `verified` avec `source=wordpress`, puis **302 vers la même URL sans le jeton**
+  (`Referrer-Policy: no-referrer`, `Cache-Control: no-store`) ; jeton invalide → ignoré, comportement anonyme ;
+- anonyme → boutons « Se connecter / Créer un compte » (cible `_top`, URLs acceptées seulement sous
+  `WP_SITE_PREFIX`) à la place de la capture d'email, qui reste le repli hors WordPress ;
+- `AUTH_MODE` : `open` (public), `optional` (défaut : gratuit limité pour anonymes, complet pour membres),
+  `required` (tout derrière la connexion, `REQUIRED_LEVELS="2,3"` optionnel ; l'API refuse aussi les accès directs).
+
+Le secret `WP_TOKEN_SECRET` = `CREAPULSE_TOOLS_TOKEN_SECRET` côté WordPress. Vecteur de référence pinné dans
+`tests/test_wp_token.py`. L'auto-hauteur de l'iframe reste assurée par un petit bloc HTML après le shortcode
+(écoute `vsg-height` sur `iframe.creapulse-tool`).
+
 ## Réglages qualité / gating (env)
 
 | Variable | Défaut | Effet |
