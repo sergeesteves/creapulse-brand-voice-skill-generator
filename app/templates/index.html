@@ -47,9 +47,9 @@
     <h2>Réservé aux membres</h2>
     <p>Cet outil est accessible avec un compte Creapulse{% if settings.required_levels %} et l'adhésion correspondante{% endif %}.</p>
     <div class="row">
-      {% if login_url %}<a class="primary button" href="{{ login_url }}" target="_top">Se connecter</a>{% endif %}
-      {% if register_url %}<a class="ghost button" href="{{ register_url }}" target="_top">Créer un compte</a>{% endif %}
-      {% if not login_url %}<a class="primary button" href="https://www.creapulse.fr/" target="_top">Aller sur creapulse.fr</a>{% endif %}
+      {% if login_url %}<a class="secondary button" href="{{ login_url }}" target="_top">Se connecter</a>{% endif %}
+      {% if register_url %}<a class="secondary button" href="{{ register_url }}" target="_top">Créer un compte</a>{% endif %}
+      {% if not login_url %}<a class="secondary button" href="https://www.creapulse.fr/" target="_top">Aller sur creapulse.fr</a>{% endif %}
     </div>
   </section>
   {% endif %}
@@ -124,7 +124,7 @@
     <div class="cta">
       <h3>Et pour produire à cette voix, sans y passer vos soirées ?</h3>
       <p>Ceci est la couche explicite de votre voix. Le système complet ajoute des exemples verbatim, l'adaptation par canal (blog, LinkedIn, Reddit, newsletter) et l'automatisation de la production. Si c'est le sujet, parlons-en.</p>
-      <a class="primary button" href="{{ settings.cta_url }}" target="_blank" rel="noopener">Automatiser la production de contenu à cette voix</a>
+      <a class="secondary button" href="{{ settings.cta_url }}" target="_blank" rel="noopener">Automatiser la production de contenu à cette voix</a>
     </div>
   </section>
 
@@ -150,8 +150,8 @@
     <h3>Continuer avec votre compte Creapulse</h3>
     <p id="email-reason">Votre génération gratuite est utilisée. Un compte Creapulse (gratuit) débloque des générations supplémentaires et le téléchargement du skill.</p>
     <div class="row">
-      <a class="primary button" href="{{ login_url }}" target="_top">Se connecter</a>
-      {% if register_url %}<a class="ghost button" href="{{ register_url }}" target="_top">Créer un compte</a>{% endif %}
+      <a class="secondary button" href="{{ login_url }}" target="_top">Se connecter</a>
+      {% if register_url %}<a class="secondary button" href="{{ register_url }}" target="_top">Créer un compte</a>{% endif %}
     </div>
     <form id="email-form" hidden>
     {% else %}
@@ -162,7 +162,7 @@
       <input type="email" id="email-input" placeholder="vous@votre-domaine.fr" required>
       <label class="check"><input type="checkbox" id="consent" required> J'accepte que Creapulse conserve mon email pour m'envoyer ce lien d'accès et, éventuellement, me recontacter au sujet de mes contenus. Pas de newsletter, pas de revente. <a href="{{ settings.privacy_url }}" target="_blank" rel="noopener">Confidentialité</a>.</label>
       <div class="row">
-        <button type="submit" class="primary">{% if mail_mode == "smtp" %}Recevoir mon lien{% else %}Débloquer l'accès{% endif %}</button>
+        <button type="submit" class="secondary">{% if mail_mode == "smtp" %}Recevoir mon lien{% else %}Débloquer l'accès{% endif %}</button>
       </div>
       <div id="email-msg" class="flash" hidden></div>
     </form>
