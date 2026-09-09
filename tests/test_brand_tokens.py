@@ -38,9 +38,8 @@ def test_roles_use_fill_versions_for_text():
     assert _token("--secondary") == "var(--cp-primary-fill)"
     assert _token("--link") == "var(--cp-primary-fill)"
     # #029ae5 n'est jamais une couleur de texte : seulement bordures / filets / spinner
-    for line in CSS.splitlines():
-        if "var(--cp-primary)" in line:
-            assert "color:" not in line.replace("border-top-color", "").replace("border-color", ""), line
+    assert not re.search(r"(?<![\w-])color:\s*var\(--cp-primary\)", CSS)
+    assert not re.search(r"(?<![\w-])color:\s*var\(--cp-accent\)", CSS)
 
 
 def test_single_cta_per_page():
