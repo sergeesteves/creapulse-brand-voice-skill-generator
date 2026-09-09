@@ -42,6 +42,13 @@ def test_roles_use_fill_versions_for_text():
     assert not re.search(r"(?<![\w-])color:\s*var\(--cp-accent\)", CSS)
 
 
+def test_outlined_button_hover_keeps_white_label():
+    """Au survol le fond passe en bleu -fill : le libellé doit devenir blanc, jamais rester bleu (1:1)."""
+    m = re.search(r"button\.ghost:hover[^{]*\{([^}]*)\}", CSS)
+    assert m and "background: var(--cp-primary-fill)" in m.group(1) and "color: var(--secondary-ink)" in m.group(1)
+    assert _token("--secondary-ink") == "#fff"
+
+
 def test_single_cta_per_page():
     html = (Path(__file__).resolve().parents[1] / "app" / "templates" / "index.html").read_text(encoding="utf-8")
     assert html.count('class="primary"') + html.count('class="primary button"') == 1  # « Distiller ma voix »
