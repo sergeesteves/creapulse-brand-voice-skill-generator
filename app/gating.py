@@ -1,6 +1,7 @@
 """Gating : 1 génération anonyme, puis email (magic-link) ; caps par compte, par IP et global."""
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import hmac
 import re
@@ -43,17 +44,42 @@ def read_anon(value: str | None) -> int:
         return 0
 
 
-def sign_session(email: str) -> str:
-    return _serializer("session").dumps({"e": email.strip().lower()})
+@dataclass
+class Session:
+    email: str
+    source: str = "email"            # email (capture directe / magic-link) | wordpress (jeton signé)
+    levels: tuple[int, ...] = ()     # niveaux PMPro actifs (source wordpress uniquement)
+    name: str = ""
+
+    @property
+    def is_member(self) -> bool:
+        return self.source == "wordpress"
+
+    def has_level(self, required: tuple[int, ...]) -> bool:
+        return not required or any(l in self.levels for l in required)
 
 
-def read_session(value: str | None) -> str | None:
+def sign_session(email: str, source: str = "email", levels: tuple[int, ...] = (), name: str = "") -> str:
+    return _serializer("session").dumps({"e": email.strip().lower(), "s": source, "l": list(levels), "n": name[:80]})
+
+
+def read_session(value: str | None) -> Session | None:
     if not value:
         return None
+    # Une session membre expire plus vite (elle suit la déconnexion WordPress) : on lit sans max_age,
+    # puis on applique le TTL selon la source.
     try:
-        data = _serializer("session").loads(value, max_age=settings.session_ttl_s)
+        data, ts = _serializer("session").loads(value, max_age=settings.session_ttl_s, return_timestamp=True)
         email = data.get("e")
-        return email if valid_email(email or "") else None
+        if not valid_email(email or ""):
+            return None
+        source = data.get("s") or "email"
+        if source == "wordpress":
+            age = (dt.datetime.now(dt.timezone.utc) - ts).total_seconds()
+            if age > settings.member_session_ttl_s:
+                return None
+        levels = tuple(int(x) for x in (data.get("l") or []) if isinstance(x, int))
+        return Session(email=email, source=source, levels=levels, name=str(data.get("n") or ""))
     except (BadSignature, SignatureExpired, ValueError, TypeError, AttributeError):
         return None
 

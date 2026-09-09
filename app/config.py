@@ -42,6 +42,15 @@ class Settings:
     # --- Secrets ---
     secret_key: str = os.getenv("SECRET_KEY", "")
 
+    # --- Identité WordPress (jeton signé émis par creapulse-tools) ---
+    wp_token_secret: str = os.getenv("WP_TOKEN_SECRET", "")
+    auth_mode: str = (os.getenv("AUTH_MODE", "optional").strip().lower() or "optional")  # open | optional | required
+    required_levels: tuple[int, ...] = tuple(
+        int(x) for x in os.getenv("REQUIRED_LEVELS", "").replace(";", ",").split(",") if x.strip().isdigit()
+    )
+    member_session_ttl_s: int = _int("MEMBER_SESSION_TTL_S", 8 * 3600)   # session courte : suit la déconnexion WP
+    wp_site_prefix: str = os.getenv("WP_SITE_PREFIX", "https://www.creapulse.fr/")  # allowlist des login_url/register_url
+
     # --- Store (Postgres en prod, SQLite en dev/tests) ---
     database_url: str = os.getenv("DATABASE_URL", "sqlite:///./voice-skill.db")
 
@@ -108,6 +117,10 @@ class Settings:
             problems.append("CRAWL4AI_TOKEN manquant")
         if not self.llm_api_key:
             problems.append("LLM_API_KEY manquante (clé omniroute)")
+        if self.auth_mode not in ("open", "optional", "required"):
+            problems.append(f"AUTH_MODE invalide : {self.auth_mode}")
+        if self.auth_mode == "required" and not self.wp_token_secret:
+            problems.append("AUTH_MODE=required exige WP_TOKEN_SECRET")
         return problems
 
 

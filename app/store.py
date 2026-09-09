@@ -27,8 +27,13 @@ SCHEMA = [
         consent_at  TEXT,
         verified_at TEXT,
         last_seen   TEXT,
-        generations INTEGER NOT NULL DEFAULT 0
+        generations INTEGER NOT NULL DEFAULT 0,
+        source      TEXT
     )""",
+]
+# Migrations additives (colonnes ajoutées après coup) — idempotentes, l'erreur "existe déjà" est ignorée
+MIGRATIONS = [
+    "ALTER TABLE leads ADD COLUMN source TEXT",
 ]
 
 
@@ -77,6 +82,12 @@ class Store:
         with self._conn() as c:
             for stmt in SCHEMA:
                 c.execute(stmt)
+        for stmt in MIGRATIONS:
+            try:
+                with self._conn() as c:
+                    c.execute(stmt)
+            except Exception:  # colonne déjà présente
+                pass
 
     def close(self) -> None:
         if self._pool:
@@ -116,22 +127,24 @@ class Store:
             c.execute(self._q("DELETE FROM usage_counters WHERE day < %s"), (limit,))
 
     # --- leads ------------------------------------------------------------
-    def upsert_lead(self, email: str, consent: bool) -> None:
+    def upsert_lead(self, email: str, consent: bool, source: str | None = None) -> None:
         email = email.strip().lower()
         ts = now_iso()
         sql = self._q(
-            "INSERT INTO leads (email, created_at, consent_at, last_seen) VALUES (%s, %s, %s, %s) "
+            "INSERT INTO leads (email, created_at, consent_at, last_seen, source) VALUES (%s, %s, %s, %s, %s) "
             "ON CONFLICT (email) DO UPDATE SET last_seen = EXCLUDED.last_seen, "
-            "consent_at = COALESCE(leads.consent_at, EXCLUDED.consent_at)"
+            "consent_at = COALESCE(leads.consent_at, EXCLUDED.consent_at), "
+            "source = COALESCE(EXCLUDED.source, leads.source)"
         )
         with self._conn() as c:
-            c.execute(sql, (email, ts, ts if consent else None, ts))
+            c.execute(sql, (email, ts, ts if consent else None, ts, source))
 
-    def mark_verified(self, email: str) -> None:
+    def mark_verified(self, email: str, source: str | None = None) -> None:
         ts = now_iso()
-        sql = self._q("UPDATE leads SET verified_at = COALESCE(verified_at, %s), last_seen = %s WHERE email = %s")
+        sql = self._q("UPDATE leads SET verified_at = COALESCE(verified_at, %s), last_seen = %s, "
+                      "source = COALESCE(%s, source) WHERE email = %s")
         with self._conn() as c:
-            c.execute(sql, (ts, ts, email.strip().lower()))
+            c.execute(sql, (ts, ts, source, email.strip().lower()))
 
     def bump_lead_generations(self, email: str) -> None:
         sql = self._q("UPDATE leads SET generations = generations + 1, last_seen = %s WHERE email = %s")
@@ -139,12 +152,12 @@ class Store:
             c.execute(sql, (now_iso(), email.strip().lower()))
 
     def get_lead(self, email: str) -> dict | None:
-        sql = self._q("SELECT email, created_at, consent_at, verified_at, last_seen, generations FROM leads WHERE email = %s")
+        sql = self._q("SELECT email, created_at, consent_at, verified_at, last_seen, generations, source FROM leads WHERE email = %s")
         with self._conn() as c:
             row = c.execute(sql, (email.strip().lower(),)).fetchone()
         if not row:
             return None
-        keys = ["email", "created_at", "consent_at", "verified_at", "last_seen", "generations"]
+        keys = ["email", "created_at", "consent_at", "verified_at", "last_seen", "generations", "source"]
         return dict(zip(keys, row))
 
 

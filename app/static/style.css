@@ -50,6 +50,9 @@ label.check.locked { color: var(--muted); }
 .toolbar { display: flex; gap: 10px; align-items: center; margin: 8px 0; }
 pre { background: #1e1f22; color: #f2f2f0; border-radius: 10px; padding: 16px; overflow: auto; max-height: 520px; font: 13px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word; }
 code { font-family: var(--mono); font-size: 90%; background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+a.button.ghost { border: 1px solid var(--line); border-radius: 8px; padding: 11px 18px; text-decoration: none; color: var(--ink); display: inline-block; }
+.account a.link, .account-embed a.link { text-decoration: underline; color: var(--accent); font-size: 14px; }
+.card.locked { text-align: center; }
 .usage { margin-top: 22px; }
 .usage h4 { margin: 14px 0 4px; font-size: 15px; }
 .usage ul { margin: 4px 0 0; padding-left: 20px; font-size: 15px; }

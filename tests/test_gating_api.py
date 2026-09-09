@@ -55,7 +55,8 @@ def test_store_counters_are_atomic_and_reversible():
 def test_signed_tokens_roundtrip():
     assert gating.read_anon(gating.sign_anon(2)) == 2
     assert gating.read_anon("garbage") == 0
-    assert gating.read_session(gating.sign_session("a@b.fr")) == "a@b.fr"
+    sess = gating.read_session(gating.sign_session("a@b.fr"))
+    assert sess.email == "a@b.fr" and sess.source == "email" and not sess.is_member
     assert gating.read_magic_token(gating.make_magic_token("a@b.fr")) == "a@b.fr"
     assert gating.read_magic_token("nope") is None
 

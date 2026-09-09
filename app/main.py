@@ -12,6 +12,7 @@ import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlencode
 
 import httpx
 from fastapi import Body, FastAPI, Request
@@ -19,6 +20,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.templating import Jinja2Templates
 
 from . import gating, render
+from . import wp_token as wp_token_mod
 from .config import settings
 from .distill import DistillError, distill
 from .mailer import send_magic_link
@@ -99,8 +101,32 @@ def _error(status: int, code: str, message: str, **extra: Any) -> JSONResponse:
     return JSONResponse({"ok": False, "code": code, "message": message, **extra}, status_code=status)
 
 
-def _session_email(request: Request) -> str | None:
+def _session(request: Request) -> gating.Session | None:
     return gating.read_session(request.cookies.get(gating.SESSION_COOKIE))
+
+
+def _session_email(request: Request) -> str | None:
+    sess = _session(request)
+    return sess.email if sess else None
+
+
+def _access_ok(sess: gating.Session | None) -> bool:
+    """Mode required : il faut une session membre (jeton WordPress) avec un niveau requis, le cas échéant."""
+    if settings.auth_mode != "required":
+        return True
+    return bool(sess and sess.is_member and sess.has_level(settings.required_levels))
+
+
+def _wp_link(request: Request, name: str) -> str:
+    """login_url / register_url transmis par le shortcode WordPress — acceptés seulement sur le site."""
+    raw = unquote(request.query_params.get(name) or "").strip()
+    return raw if raw.startswith(settings.wp_site_prefix) and " " not in raw else ""
+
+
+def _home_url(request: Request, drop: tuple[str, ...]) -> str:
+    """URL de la page courante (avec préfixe) sans les paramètres listés."""
+    kept = [(k, v) for k, v in request.query_params.multi_items() if k not in drop]
+    return (settings.root_path or "") + "/" + (("?" + urlencode(kept)) if kept else "")
 
 
 # ---------------------------------------------------------------------------
@@ -109,9 +135,30 @@ def _session_email(request: Request) -> str | None:
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    email = _session_email(request)
+    # 1. Jeton signé WordPress (shortcode creapulse-tools) → session membre, puis on retire le jeton de l'URL
+    wp_token = request.query_params.get("wp_token")
+    if wp_token:
+        ident = wp_token_mod.verify(wp_token, settings.wp_token_secret)
+        resp = RedirectResponse(_home_url(request, drop=("wp_token", "login_url", "register_url")), status_code=302)
+        resp.headers["Referrer-Policy"] = "no-referrer"
+        resp.headers["Cache-Control"] = "no-store"
+        if ident:
+            store = get_store()
+            store.upsert_lead(ident.email, consent=True, source="wordpress")
+            store.mark_verified(ident.email, source="wordpress")
+            _set_cookie(resp, gating.SESSION_COOKIE,
+                        gating.sign_session(ident.email, "wordpress", ident.levels, ident.name),
+                        settings.member_session_ttl_s)
+            resp.delete_cookie(gating.ANON_COOKIE, path=settings.cookie_path)
+            log.info("wp token ok user=%s levels=%s", ident.user_id, list(ident.levels))
+        else:
+            log.warning("wp token rejeté (signature/expiration/format) — comportement anonyme")
+        return resp
+
+    sess = _session(request)
     anon = gating.read_anon(request.cookies.get(gating.ANON_COOKIE))
-    return templates.TemplateResponse(
+    login_url, register_url = _wp_link(request, "login_url"), _wp_link(request, "register_url")
+    resp = templates.TemplateResponse(
         request,
         "index.html",
         {
@@ -120,7 +167,13 @@ async def index(request: Request):
             "static_version": STATIC_VERSION,
             "mail_mode": settings.mail_mode,
             "embed": request.query_params.get("embed") == "1",
-            "email": email,
+            "email": sess.email if sess else None,
+            "session": sess,
+            "is_member": bool(sess and sess.is_member),
+            "locked": not _access_ok(sess),
+            "auth_mode": settings.auth_mode,
+            "login_url": login_url,
+            "register_url": register_url,
             "anon_used": anon,
             "anon_free": settings.anon_free_generations,
             "connected": request.query_params.get("connected") == "1",
@@ -130,6 +183,9 @@ async def index(request: Request):
             "min_words": settings.min_words_per_page,
         },
     )
+    resp.headers["Referrer-Policy"] = "no-referrer"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @app.get("/health")
@@ -159,7 +215,10 @@ async def api_generate(request: Request, payload: dict = Body(...)):
     except InputError as exc:
         return _error(400, "input", str(exc))
 
-    email = _session_email(request)
+    sess = _session(request)
+    if not _access_ok(sess):
+        return _error(403, "need_login", "Cet outil est réservé aux membres. Connectez-vous ou créez un compte.")
+    email = sess.email if sess else None
     anon_count = gating.read_anon(request.cookies.get(gating.ANON_COOKIE))
     store = get_store()
     gate = gating.Gate(store)
@@ -234,6 +293,8 @@ async def api_magic_link(request: Request, payload: dict = Body(...)):
         return _error(429, "rate_limited", "Trop de demandes. Patientez une minute.")
     email = str(payload.get("email") or "").strip().lower()
     consent = bool(payload.get("consent"))
+    if settings.auth_mode == "required":
+        return _error(403, "need_login", "Cet outil est réservé aux membres : la connexion passe par le site.")
     if not gating.valid_email(email):
         return _error(400, "email", "Adresse email invalide.")
     if not consent:

@@ -11,9 +11,14 @@
 <header class="top">
   <a class="brand" href="https://www.creapulse.fr/">creapulse.fr</a>
   <div class="account">
-    {% if email %}
+    {% if is_member %}
+      <span class="pill ok">Membre Creapulse : {{ email }}</span>
+    {% elif email %}
       <span class="pill ok">Connecté : {{ email }}</span>
       <button class="link" id="logout">Se déconnecter</button>
+    {% elif login_url %}
+      <a class="link" href="{{ login_url }}" target="_top">Se connecter</a>
+      {% if register_url %}<a class="link" href="{{ register_url }}" target="_top">Créer un compte</a>{% endif %}
     {% else %}
       <span class="pill">Mode découverte : {{ anon_free - anon_used if anon_free > anon_used else 0 }} génération gratuite</span>
       <button class="link" id="open-email">J'ai déjà un lien ? / Continuer avec mon email</button>
@@ -31,14 +36,27 @@
 
   {% if embed %}
   <div class="account-embed">
-    {% if email %}<span class="pill ok">Connecté : {{ email }}</span><button class="link" id="logout-embed">Se déconnecter</button>
+    {% if is_member %}<span class="pill ok">Membre Creapulse : {{ email }}</span>
+    {% elif email %}<span class="pill ok">Connecté : {{ email }}</span><button class="link" id="logout-embed">Se déconnecter</button>
+    {% elif login_url %}<span class="pill">{{ anon_free - anon_used if anon_free > anon_used else 0 }} génération gratuite sans compte</span><a class="link" href="{{ login_url }}" target="_top">Se connecter</a>{% if register_url %}<a class="link" href="{{ register_url }}" target="_top">Créer un compte</a>{% endif %}
     {% else %}<span class="pill">{{ anon_free - anon_used if anon_free > anon_used else 0 }} génération gratuite sans email</span><button class="link" id="open-email-embed">Continuer avec mon email</button>{% endif %}
   </div>
+  {% endif %}
+  {% if locked %}
+  <section class="card locked">
+    <h2>Réservé aux membres</h2>
+    <p>Cet outil est accessible avec un compte Creapulse{% if settings.required_levels %} et l'adhésion correspondante{% endif %}.</p>
+    <div class="row">
+      {% if login_url %}<a class="primary button" href="{{ login_url }}" target="_top">Se connecter</a>{% endif %}
+      {% if register_url %}<a class="ghost button" href="{{ register_url }}" target="_top">Créer un compte</a>{% endif %}
+      {% if not login_url %}<a class="primary button" href="https://www.creapulse.fr/" target="_top">Aller sur creapulse.fr</a>{% endif %}
+    </div>
+  </section>
   {% endif %}
   {% if connected %}<div class="flash ok">Email vérifié. Vous pouvez générer plusieurs profils et télécharger le skill.</div>{% endif %}
   {% if auth_error %}<div class="flash err">Ce lien est invalide ou expiré. Redemandez-en un ci-dessous.</div>{% endif %}
 
-  <section class="card" id="form-card">
+  <section class="card" id="form-card" {% if locked %}hidden{% endif %}>
     <h2>1. Vos articles</h2>
     <p class="hint">{{ min_urls }} à {{ max_urls }} URLs d'<strong>articles complets</strong> que vous avez rédigés (billets de blog, pages de fond). Pas de page d'accueil, de catégorie ni de page vitrine : il faut du texte, au moins {{ min_words }} mots par page. Plus les articles sont variés en sujets, plus le profil capte la mécanique de votre voix plutôt que ses thèmes.</p>
     <form id="gen-form" autocomplete="off">
@@ -128,9 +146,19 @@
 <div class="modal" id="email-modal" hidden>
   <div class="modal-box">
     <button class="close" id="close-email" aria-label="Fermer">×</button>
+    {% if login_url %}
+    <h3>Continuer avec votre compte Creapulse</h3>
+    <p id="email-reason">Votre génération gratuite est utilisée. Un compte Creapulse (gratuit) débloque des générations supplémentaires et le téléchargement du skill.</p>
+    <div class="row">
+      <a class="primary button" href="{{ login_url }}" target="_top">Se connecter</a>
+      {% if register_url %}<a class="ghost button" href="{{ register_url }}" target="_top">Créer un compte</a>{% endif %}
+    </div>
+    <form id="email-form" hidden>
+    {% else %}
     <h3>Continuer avec votre email</h3>
     <p id="email-reason">Votre génération gratuite est utilisée. Entrez votre email : {% if mail_mode == "smtp" %}vous recevez un lien d'accès qui débloque{% else %}il débloque immédiatement{% endif %} des générations supplémentaires et le téléchargement du skill.</p>
     <form id="email-form">
+    {% endif %}
       <input type="email" id="email-input" placeholder="vous@votre-domaine.fr" required>
       <label class="check"><input type="checkbox" id="consent" required> J'accepte que Creapulse conserve mon email pour m'envoyer ce lien d'accès et, éventuellement, me recontacter au sujet de mes contenus. Pas de newsletter, pas de revente. <a href="{{ settings.privacy_url }}" target="_blank" rel="noopener">Confidentialité</a>.</label>
       <div class="row">
@@ -198,7 +226,7 @@
   }
 
   function openEmail(reason) {
-    if (reason) $('#email-reason').textContent = reason;
+    if (reason && !{{ 'true' if login_url else 'false' }}) $('#email-reason').textContent = reason;
     modal.hidden = false; $('#email-input').focus();
   }
   $('#open-email') && $('#open-email').addEventListener('click', () => openEmail());
@@ -226,7 +254,7 @@
       });
       const data = await res.json();
       if (!data.ok) {
-        if (data.code === 'need_email') { openEmail(data.message); }
+        if (data.code === 'need_email' || data.code === 'need_login') { openEmail(data.message); }
         else if (data.code === 'global_cap' || data.code === 'account_cap' || data.code === 'ip_cap') {
           showError(data.message + (data.cta_url ? '\nContact : ' + data.cta_url : ''));
         } else { showError(data.message || 'Erreur.'); }
