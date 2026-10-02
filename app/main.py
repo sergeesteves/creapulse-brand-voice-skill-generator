@@ -259,9 +259,9 @@ async def api_generate(request: Request, payload: dict = Body(...)):
 
     if email:
         store.bump_lead_generations(email)
-    log.info("generation ok ip=%s email=%s pages=%d words=%d model=%s usage=%s",
+    log.info("generation ok ip=%s email=%s pages=%d words=%d guide=%dc model=%s usage=%s",
              gating.ip_key(ip)[:8], "yes" if email else "no", len(good), sum(p.words for p in good),
-             guide.model, guide.usage)
+             len(guide.markdown), guide.model, guide.usage)
 
     resp = JSONResponse({
         "ok": True,

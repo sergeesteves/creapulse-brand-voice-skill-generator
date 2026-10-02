@@ -21,6 +21,10 @@ Détails d'archi, fichiers, variables et déploiement : [README.md](./README.md)
   jamais de mention de l'archi interne (skill façade, n8n, pipeline).
 - **Le LLM ne produit que le guide 5 axes** (prompt dans `app/distill.py`). Tout l'enrobage est
   déterministe (`app/render.py`). Ne pas déplacer de logique de template vers le prompt.
+- **Le guide est plafonné à `MAX_GUIDE_CHARS` (5 000), garanti par le code.** Un profil trop long noie
+  le modèle qui l'applique. L'ordre de coupe (`TRIM_ORDER`) va du moins au plus porteur de voix :
+  on sacrifie « Structure / format » avant « Style de phrase », et jamais les citations qui ancrent
+  un trait. Ne jamais remplacer ce plafond par un simple résumé du guide.
 - **Pas d'extraits verbatim** dans l'artefact (option retirée le 2026-09-08 : complexité inutile, et risque de
   calquer le sujet plutôt que la mécanique). Les règles explicites seules. Le verbatim reste l'argument du
   « système complet » (upsell).

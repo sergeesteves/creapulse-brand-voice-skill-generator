@@ -74,6 +74,9 @@ class Settings:
     llm_temperature: float = _float("LLM_TEMPERATURE", 0.2)
     llm_timeout_s: float = _float("LLM_TIMEOUT_S", 120.0)
     llm_max_output_tokens: int = _int("LLM_MAX_OUTPUT_TOKENS", 2500)
+    # Plafond du guide 5 axes. Un profil trop long noie le modèle qui l'applique (constat mesuré
+    # le 2026-10-02 sur le guide Creapulse : 10 100 car. = 70 % des consignes du rédacteur).
+    max_guide_chars: int = _int("MAX_GUIDE_CHARS", 5000)
 
     # --- Garde-fous qualité d'entrée ---
     min_urls: int = _int("MIN_URLS", 3)   # 3 articles = minimum pour une voix fiable (décision Serge, 2026-09-08)

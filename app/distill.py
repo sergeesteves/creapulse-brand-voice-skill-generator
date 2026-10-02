@@ -1,6 +1,7 @@
 """Distillation LLM (via omniroute, OpenAI-compatible) → guide de voix sur 5 axes."""
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 
@@ -8,6 +9,8 @@ import httpx
 
 from .config import settings
 from .scraper import PageText
+
+log = logging.getLogger("voice-skill.distill")
 
 SECTIONS = [
     "Ton",
@@ -45,6 +48,9 @@ RÈGLES ABSOLUES
 - « Résumé en une phrase » : une seule phrase, sans puce, sans gras, sans citation.
 - Réponds dans la LANGUE des articles.
 - Pas d'introduction ni de conclusion hors des sections : commence directement par « ## Ton ».
+- LONGUEUR : le guide complet doit tenir en MOINS DE {max_chars} CARACTÈRES. Vise 3 à 5 traits par
+  section et 1 à 2 citations par trait. La spécificité prime sur l'exhaustivité : quatre traits
+  ancrés valent mieux qu'une liste complète et vague. Un guide trop long noie le modèle qui l'applique.
 
 SORTIE (Markdown, exactement ces sections, dans cet ordre, titres en H2 tels quels) :
 ## Ton
@@ -55,6 +61,44 @@ SORTIE (Markdown, exactement ces sections, dans cet ordre, titres en H2 tels que
 ## Résumé en une phrase   (la voix en 1 phrase — servira de description courte)
 
 Dans chaque section : des puces concrètes, en gras le trait, puis l'ancrage entre guillemets."""
+
+# Passe de raccourcissement : n'envoie QUE le guide, jamais les articles (le modèle n'a rien à
+# re-vérifier, il ne fait que couper) — l'appel coûte ~1,5 k tokens au lieu de ~11 k.
+SHORTEN_PROMPT = """Ce guide de voix éditoriale fait {actual} caractères. La limite est {max_chars}.
+Raccourcis-le sans l'affadir : un guide trop long noie le modèle qui l'applique.
+
+COMMENT RACCOURCIR, DANS CET ORDRE
+1. Coupe d'abord dans « Structure / format », puis dans « Principes édito / positionnement » :
+   ce sont les sections les moins porteuses de voix.
+2. Supprime les traits redondants d'une section à l'autre, et les traits vagues.
+3. Réduis le nombre de citations par trait, en en gardant TOUJOURS au moins une.
+4. Resserre la formulation de chaque puce.
+
+INTERDIT
+- Supprimer une des 6 sections, ou la vider.
+- Retirer toutes les citations d'un trait : ce sont elles qui transmettent la voix.
+- Résumer le guide ou le rendre générique. On coupe le moins utile, on ne dilue pas le reste.
+- Toucher au « Résumé en une phrase ».
+
+Renvoie le guide COMPLET, mêmes 6 sections H2 dans le même ordre, et rien d'autre.
+
+GUIDE À RACCOURCIR :
+{guide}"""
+
+# Ordre de coupe du filet déterministe : du moins au plus porteur de voix.
+# « Résumé en une phrase » n'y figure pas : il n'est jamais touché.
+TRIM_ORDER = [
+    "Structure / format",
+    "Principes édito / positionnement",
+    "Vocabulaire",
+    "Ton",
+    "Style de phrase",
+]
+MIN_BULLETS = 2  # plancher : en dessous, une section ne dit plus rien d'utile
+
+
+def build_system_prompt() -> str:
+    return SYSTEM_PROMPT.format(max_chars=settings.max_guide_chars)
 
 
 def build_user_prompt(pages: list[PageText], brand_name: str) -> str:
@@ -118,9 +162,44 @@ def parse_guide(raw: str) -> tuple[str, dict[str, str], str]:
     summary = re.sub(r"^[\-\*\s>]+", "", summary).replace("**", "")
     summary = re.split(r"\s+[—–-]\s+[«\"“]", summary)[0].strip()  # retire un éventuel « ancrage » cité
     sections["Résumé en une phrase"] = summary  # la section = la phrase nue (le modèle ajoute parfois puce/gras)
-    # Reconstruit un Markdown canonique (ordre garanti, titres propres)
-    canonical = "\n\n".join(f"## {s}\n{sections[s]}" for s in SECTIONS)
-    return canonical, sections, summary
+    return canonical_markdown(sections), sections, summary
+
+
+def canonical_markdown(sections: dict[str, str]) -> str:
+    """Markdown canonique : ordre garanti, titres propres."""
+    return "\n\n".join(f"## {s}\n{sections[s]}" for s in SECTIONS)
+
+
+def split_bullets(body: str) -> list[str]:
+    """Découpe une section en puces. Une puce peut tenir sur plusieurs lignes (continuations)."""
+    out: list[str] = []
+    for line in body.split("\n"):
+        if re.match(r"^\s*[-*+]\s", line) or not out:
+            out.append(line)
+        else:
+            out[-1] += "\n" + line
+    return [b for b in out if b.strip()]
+
+
+def trim_to_budget(sections: dict[str, str], max_chars: int) -> tuple[dict[str, str], int]:
+    """Filet déterministe, appliqué quand le LLM n'a pas respecté le plafond.
+
+    Retire les DERNIÈRES puces des sections les moins porteuses de voix, jamais en dessous de
+    MIN_BULLETS, jamais dans le résumé. On coupe le moins utile plutôt que de résumer l'ensemble.
+    Renvoie (sections, nombre de puces retirées).
+    """
+    sections = dict(sections)
+    removed = 0
+    while len(canonical_markdown(sections)) > max_chars:
+        for name in TRIM_ORDER:
+            bullets = split_bullets(sections.get(name, ""))
+            if len(bullets) > MIN_BULLETS:
+                sections[name] = "\n".join(bullets[:-1]).strip()
+                removed += 1
+                break
+        else:
+            break  # plus rien à retirer sans vider une section : on s'arrête et on loggue
+    return sections, removed
 
 
 async def _chat(messages: list[dict], client: httpx.AsyncClient, with_temperature: bool = True) -> tuple[str, dict, str]:
@@ -153,11 +232,50 @@ async def _chat(messages: list[dict], client: httpx.AsyncClient, with_temperatur
     return content, data.get("usage") or {}, data.get("model") or settings.llm_model
 
 
+def _merge_usage(a: dict, b: dict) -> dict:
+    return {k: (a.get(k, 0) or 0) + (b.get(k, 0) or 0)
+            for k in set(a) | set(b) if isinstance(a.get(k, 0), int) and isinstance(b.get(k, 0), int)}
+
+
+async def enforce_budget(canonical: str, sections: dict[str, str], summary: str,
+                         client: httpx.AsyncClient) -> tuple[str, dict[str, str], str, dict]:
+    """Garantit que le guide tient sous le plafond. Une passe LLM de raccourcissement ciblé, puis un
+    filet déterministe. Le plafond est tenu par le code, jamais par la seule consigne au modèle."""
+    max_chars = settings.max_guide_chars
+    if len(canonical) <= max_chars:
+        return canonical, sections, summary, {}
+
+    usage: dict = {}
+    before = len(canonical)
+    try:
+        content, usage, _ = await _chat(
+            [{"role": "system", "content": "Tu raccourcis un guide de voix éditoriale sans l'affadir."},
+             {"role": "user", "content": SHORTEN_PROMPT.format(actual=before, max_chars=max_chars,
+                                                               guide=canonical)}],
+            client,
+        )
+        short_canonical, short_sections, short_summary = parse_guide(content)
+        # On ne garde la version courte que si elle est effectivement plus courte et non vidée.
+        if len(short_canonical) < len(canonical):
+            canonical, sections, summary = short_canonical, short_sections, short_summary
+    except DistillError as exc:
+        log.warning("raccourcissement du guide impossible (%s) — on passe au filet déterministe", exc)
+
+    sections, removed = trim_to_budget(sections, max_chars)
+    canonical = canonical_markdown(sections)
+    log.info("guide %d → %d car. (plafond %d) ; puces retirées par le code : %d",
+             before, len(canonical), max_chars, removed)
+    if len(canonical) > max_chars:
+        log.warning("guide encore à %d car. après raccourcissement : plancher de %d puces atteint",
+                    len(canonical), MIN_BULLETS)
+    return canonical, sections, summary, usage
+
+
 async def distill(pages: list[PageText], brand_name: str, client: httpx.AsyncClient | None = None) -> Guide:
     own = client is None
     client = client or httpx.AsyncClient(timeout=settings.llm_timeout_s)
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": build_system_prompt()},
         {"role": "user", "content": build_user_prompt(pages, brand_name)},
     ]
     try:
@@ -176,7 +294,9 @@ async def distill(pages: list[PageText], brand_name: str, client: httpx.AsyncCli
                 canonical, sections, summary = parse_guide(content)
             except DistillError as second:
                 raise DistillError(f"profil non conforme après relance ({second})") from first
-            usage = {k: (usage.get(k, 0) or 0) + (usage2.get(k, 0) or 0) for k in set(usage) | set(usage2)}
+            usage = _merge_usage(usage, usage2)
+        canonical, sections, summary, extra = await enforce_budget(canonical, sections, summary, client)
+        usage = _merge_usage(usage, extra)
     finally:
         if own:
             await client.aclose()

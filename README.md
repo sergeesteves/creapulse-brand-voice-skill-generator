@@ -115,8 +115,29 @@ Le secret `WP_TOKEN_SECRET` = `CREAPULSE_TOOLS_TOKEN_SECRET` côté WordPress. V
 | `ACCOUNT_DAILY_CAP` | 3 | par email vérifié |
 | `GLOBAL_DAILY_CAP` | 40 | tous visiteurs — protège le budget en dur |
 | `LLM_MODEL` / `LLM_TEMPERATURE` | `openai/gpt-5.4-mini` / 0.2 | choix du modèle dans omniroute ; T° basse = mêmes URLs → même profil |
+| `MAX_GUIDE_CHARS` | 5000 | plafond du guide 5 axes, garanti par le code (voir ci-dessous) |
 
 Si le modèle refuse `temperature` (famille reasoning), l'app réessaie automatiquement sans.
+
+## Plafond de longueur du guide
+
+Un profil trop long noie le modèle qui l'applique. Mesuré le 2026-10-02 sur le guide de voix Creapulse :
+10 100 caractères pesaient 70 % des consignes système du rédacteur, et le plan n'était plus suivi.
+Le guide produit ici est donc plafonné à `MAX_GUIDE_CHARS` (5 000 par défaut), en trois temps :
+
+1. **Le budget est dans le prompt de distillation** (`build_system_prompt`), avec la consigne de viser
+   3 à 5 traits par section et 1 à 2 citations par trait. Dans le cas courant, rien d'autre ne se déclenche.
+2. **Le code vérifie** (`enforce_budget`). Si ça dépasse, **une** passe de raccourcissement ciblé, qui
+   n'envoie que le guide et jamais les articles (~1,5 k tokens au lieu de ~11 k). La consigne dit où couper :
+   d'abord « Structure / format », puis « Principes édito », puis les traits redondants, puis le nombre de
+   citations — jamais la dernière citation d'un trait, jamais une section entière, jamais le résumé.
+3. **Filet déterministe** (`trim_to_budget`) si le modèle ignore la consigne : retire les dernières puces
+   des sections les moins porteuses de voix, dans l'ordre de `TRIM_ORDER`, avec un plancher de `MIN_BULLETS`
+   par section. Le plafond est donc tenu par le code, pas par la bonne volonté du modèle.
+
+Mesuré sur un guide réel de 5 987 caractères : le filet seul ramène à 4 970 en retirant 7 puces, toutes
+dans « Structure / format » et « Principes édito ». Ton, style de phrase et vocabulaire sortent intacts,
+puisque ce sont eux qui transmettent la voix.
 
 ## Suivi coût / usage
 
