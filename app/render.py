@@ -43,6 +43,19 @@ def slugify(value: str) -> str:
 # Templates B1 / B2
 # ---------------------------------------------------------------------------
 
+SUGGESTION_MARK = "(à valider)"
+
+SUGGESTION_NOTE = """> **Quelques expressions sont suivies de « (à valider) »** : elles ne figurent pas telles quelles
+> dans vos articles. L'outil les propose parce qu'il n'en avait pas trouvé assez pour que la liste
+> soit variée, et qu'une liste trop courte fait toujours ressortir la même tournure. Gardez celles
+> que vous auriez pu écrire, supprimez les autres. Tout le reste vient de vos textes."""
+
+
+def suggestion_note(guide_md: str) -> str:
+    """Note d'avertissement, seulement si le guide contient des expressions suggérées."""
+    return SUGGESTION_NOTE if SUGGESTION_MARK in guide_md else ""
+
+
 USAGE_BLOCK = """> **Comment l'utiliser**
 > - **ChatGPT** : collez ce bloc dans les instructions d'un *Projet* ou d'un *GPT* (ou dans *Instructions personnalisées* pour toutes vos conversations).
 > - **Claude** : créez un *Projet* et collez-le dans ses instructions (ou importez la version « skill » dans Paramètres → Skills).
@@ -53,9 +66,11 @@ def render_prompt_block(name: str, guide_md: str, extra_section: str = "") -> st
     body = guide_md.strip()
     if extra_section:
         body += "\n\n" + extra_section.strip()
+    note = suggestion_note(body)
+    note = f"\n{note}\n" if note else ""
     return f"""# Voix de marque — {name}
 {USAGE_BLOCK}
-
+{note}
 Adoptez systématiquement la voix suivante pour rédiger/réviser du contenu {name}.
 N'inventez pas de traits absents ; en cas de doute, restez neutre.
 
@@ -77,6 +92,8 @@ def render_skill(name: str, slug: str, summary: str, guide_md: str, extra_sectio
     body = guide_md.strip()
     if extra_section:
         body += "\n\n" + extra_section.strip()
+    note = suggestion_note(body)
+    note = f"\n{note}\n" if note else ""
     description = _yaml_escape(f"Applique la voix de marque {name}. {summary} Pour rédiger ou réviser tout contenu {name}.")
     return f"""---
 name: voix-{slug}
@@ -87,7 +104,7 @@ description: "{description}"
 
 Applique cette voix pour toute rédaction/révision {name}. COMMENT écrire, pas QUOI.
 N'invente pas de traits absents ; en cas de doute, reste neutre.
-
+{note}
 {body}
 
 ---

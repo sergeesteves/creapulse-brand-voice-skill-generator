@@ -77,6 +77,11 @@ class Settings:
     # Plafond du guide 5 axes. Un profil trop long noie le modèle qui l'applique (constat mesuré
     # le 2026-10-02 sur le guide Creapulse : 10 100 car. = 70 % des consignes du rédacteur).
     max_guide_chars: int = _int("MAX_GUIDE_CHARS", 5000)
+    # Minimum d'expressions pour un trait à variantes (incises, vocabulaire de jugement…).
+    # En dessous, le modèle qui applique le guide recycle toujours la même : mesuré sur le guide
+    # Creapulse, où trois exemples d'attaques familières produisaient « Bon, » à chaque section.
+    min_repertoire: int = _int("MIN_REPERTOIRE", 5)
+    max_suggestions: int = _int("MAX_SUGGESTIONS", 3)
 
     # --- Garde-fous qualité d'entrée ---
     min_urls: int = _int("MIN_URLS", 3)   # 3 articles = minimum pour une voix fiable (décision Serge, 2026-09-08)

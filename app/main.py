@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.templating import Jinja2Templates
 from starlette.background import BackgroundTask
 
+from . import distill as distill_mod
 from . import gating, render
 from . import wp_token as wp_token_mod
 from .config import settings
@@ -273,6 +274,7 @@ async def api_generate(request: Request, payload: dict = Body(...)):
         "skill_md": skill_md,
         "skill_filename": render.skill_filename(slug),
         "pages": [_page_view(p) for p in pages],
+        "suggestions": distill_mod.count_suggestions(guide.markdown),
         "download_available": bool(email),
         "connected": bool(email),
         "cta_url": settings.cta_url,

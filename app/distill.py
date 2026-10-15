@@ -48,6 +48,18 @@ RÈGLES ABSOLUES
 - « Résumé en une phrase » : une seule phrase, sans puce, sans gras, sans citation.
 - Réponds dans la LANGUE des articles.
 - Pas d'introduction ni de conclusion hors des sections : commence directement par « ## Ton ».
+- FRÉQUENCE : pour chaque trait, dis s'il est constant, fréquent, occasionnel ou rare dans les
+  textes. Un trait rare présenté sans sa rareté sera SUR-EMPLOYÉ par le modèle qui lira ce guide :
+  il rend la consigne visible pour prouver qu'il l'a suivie. Précise aussi de varier les tournures
+  d'une occurrence à l'autre plutôt que de reprendre toujours la même.
+- RÉPERTOIRE : pour les traits à variantes (incises et tournures familières, vocabulaire de
+  jugement, formules de liaison), donne AU MOINS {min_repertoire} expressions DIFFÉRENTES tirées
+  des textes. Une liste de deux ou trois expressions se recycle : le modèle pioche toujours la même.
+- SUGGESTIONS : si les textes ne fournissent pas {min_repertoire} expressions pour un de ces
+  traits, complète avec {max_suggestions} au plus, de la même famille d'intention et du même
+  registre, chacune suivie de « (à valider) ». Ne remplace JAMAIS une expression observée par une
+  suggestion, et n'en ajoute nulle part ailleurs. Hors de ces listes, la règle « n'invente rien »
+  reste absolue.
 - LONGUEUR : le guide complet doit tenir en MOINS DE {max_chars} CARACTÈRES. Vise 3 à 5 traits par
   section et 1 à 2 citations par trait. La spécificité prime sur l'exhaustivité : quatre traits
   ancrés valent mieux qu'une liste complète et vague. Un guide trop long noie le modèle qui l'applique.
@@ -77,6 +89,8 @@ COMMENT RACCOURCIR, DANS CET ORDRE
 INTERDIT
 - Supprimer une des 6 sections, ou la vider.
 - Retirer toutes les citations d'un trait : ce sont elles qui transmettent la voix.
+- Réduire un répertoire d'expressions sous {min_repertoire} entrées : une liste trop courte fait
+  recycler toujours la même tournure. Coupe ailleurs.
 - Résumer le guide ou le rendre générique. On coupe le moins utile, on ne dilue pas le reste.
 - Toucher au « Résumé en une phrase ».
 
@@ -97,8 +111,17 @@ TRIM_ORDER = [
 MIN_BULLETS = 2  # plancher : en dessous, une section ne dit plus rien d'utile
 
 
+SUGGESTION_MARK = "(à valider)"
+
+
 def build_system_prompt() -> str:
-    return SYSTEM_PROMPT.format(max_chars=settings.max_guide_chars)
+    return SYSTEM_PROMPT.format(max_chars=settings.max_guide_chars,
+                                min_repertoire=settings.min_repertoire,
+                                max_suggestions=settings.max_suggestions)
+
+
+def count_suggestions(guide: str) -> int:
+    return guide.count(SUGGESTION_MARK)
 
 
 def build_user_prompt(pages: list[PageText], brand_name: str) -> str:
@@ -251,6 +274,7 @@ async def enforce_budget(canonical: str, sections: dict[str, str], summary: str,
         content, usage, _ = await _chat(
             [{"role": "system", "content": "Tu raccourcis un guide de voix éditoriale sans l'affadir."},
              {"role": "user", "content": SHORTEN_PROMPT.format(actual=before, max_chars=max_chars,
+                                                               min_repertoire=settings.min_repertoire,
                                                                guide=canonical)}],
             client,
         )

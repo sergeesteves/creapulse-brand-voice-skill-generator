@@ -81,6 +81,7 @@
     <h2>2. Votre voix de marque — <span id="res-name"></span></h2>
     <p class="summary" id="res-summary"></p>
     <ul class="pages" id="res-pages"></ul>
+    <div class="flash" id="res-suggestions" hidden></div>
 
     <div class="tabs">
       <button class="tab active" data-tab="prompt">Bloc prompt universel</button>
@@ -277,6 +278,12 @@
       li.textContent = (p.ok ? '✓ ' : '✗ ') + (p.title || p.url) + (p.ok ? ' — ' + p.words + ' mots' : ' — ' + p.reason);
       ul.appendChild(li);
     });
+    const sugg = $('#res-suggestions');
+    if (data.suggestions > 0) {
+      sugg.textContent = data.suggestions + (data.suggestions > 1 ? ' expressions sont suivies' : ' expression est suivie')
+        + ' de « à valider » : vos articles n\'en fournissaient pas assez pour que la liste soit variée, et une liste trop courte fait toujours ressortir la même tournure. Relisez-les, gardez celles que vous auriez pu écrire, supprimez les autres. Tout le reste vient de vos textes.';
+      sugg.hidden = false;
+    } else { sugg.hidden = true; }
     $('#out-prompt').textContent = data.prompt_block;
     $('#out-skill').textContent = data.skill_md;
     $('#download-lock').hidden = data.download_available;
