@@ -126,6 +126,17 @@ def test_anonymous_gets_wordpress_links_when_provided(client):
     assert "evil.example" not in html
 
 
+def test_staging_links_are_accepted_too(client):
+    """L'outil est embarqué dans la prod ET dans le staging, qui envoie ses propres liens."""
+    from app.config import settings as s
+    assert any("staging.creapulse.fr" in p for p in s.wp_site_prefixes)
+    html = client.get("/?embed=1&login_url=https%3A%2F%2Fstaging.creapulse.fr%2Flogin%2F").text
+    assert 'href="https://staging.creapulse.fr/login/" target="_top">Se connecter' in html
+    # un domaine qui commence pareil mais n'est pas le site reste refusé
+    html = client.get("/?embed=1&login_url=https%3A%2F%2Fstaging.creapulse.fr.evil.example%2Fx").text
+    assert "evil.example" not in html
+
+
 def test_required_mode_blocks_anonymous_and_non_members(client, monkeypatch):
     monkeypatch.setattr(settings, "auth_mode", "required")
     monkeypatch.setattr(settings, "required_levels", (2,))

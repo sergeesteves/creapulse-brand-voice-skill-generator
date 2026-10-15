@@ -49,7 +49,14 @@ class Settings:
         int(x) for x in os.getenv("REQUIRED_LEVELS", "").replace(";", ",").split(",") if x.strip().isdigit()
     )
     member_session_ttl_s: int = _int("MEMBER_SESSION_TTL_S", 8 * 3600)   # session courte : suit la déconnexion WP
-    wp_site_prefix: str = os.getenv("WP_SITE_PREFIX", "https://www.creapulse.fr/")  # allowlist des login_url/register_url
+    # Allowlist des login_url / register_url transmis par le shortcode. Plusieurs préfixes séparés
+    # par une virgule : l'outil est embarqué dans la prod ET dans le staging, qui envoie ses propres
+    # liens. Un seul préfixe ferait disparaître « Se connecter » côté staging, sans erreur visible.
+    wp_site_prefixes: tuple[str, ...] = tuple(
+        p.strip() for p in os.getenv("WP_SITE_PREFIX",
+                                     "https://www.creapulse.fr/,https://staging.creapulse.fr/").split(",")
+        if p.strip().startswith("https://")
+    )
     # Déclaration d'usage à WordPress (creapulse-tools `tool-event` → Nimble). URL vide = désactivé.
     wp_tool_event_url: str = os.getenv("WP_TOOL_EVENT_URL", "https://www.creapulse.fr/wp-json/creapulse-tools/v1/tool-event").strip()
     tool_slug: str = os.getenv("TOOL_SLUG", "voix-de-marque").strip()

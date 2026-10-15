@@ -123,7 +123,8 @@ def _access_ok(sess: gating.Session | None) -> bool:
 def _wp_link(request: Request, name: str) -> str:
     """login_url / register_url transmis par le shortcode WordPress — acceptés seulement sur le site."""
     raw = unquote(request.query_params.get(name) or "").strip()
-    return raw if raw.startswith(settings.wp_site_prefix) and " " not in raw else ""
+    ok = any(raw.startswith(p) for p in settings.wp_site_prefixes)
+    return raw if ok and " " not in raw else ""
 
 
 def _home_url(request: Request, drop: tuple[str, ...]) -> str:
