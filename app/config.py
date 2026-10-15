@@ -76,7 +76,9 @@ class Settings:
     llm_max_output_tokens: int = _int("LLM_MAX_OUTPUT_TOKENS", 2500)
     # Plafond du guide 5 axes. Un profil trop long noie le modèle qui l'applique (constat mesuré
     # le 2026-10-02 sur le guide Creapulse : 10 100 car. = 70 % des consignes du rédacteur).
-    max_guide_chars: int = _int("MAX_GUIDE_CHARS", 5000)
+    # 5 500 depuis le 2026-10-15 : le guide porte désormais la fréquence de chaque trait et des
+    # répertoires d'au moins 5 expressions, deux ajouts qui empêchent la sur-utilisation des tics.
+    max_guide_chars: int = _int("MAX_GUIDE_CHARS", 5500)
     # Minimum d'expressions pour un trait à variantes (incises, vocabulaire de jugement…).
     # En dessous, le modèle qui applique le guide recycle toujours la même : mesuré sur le guide
     # Creapulse, où trois exemples d'attaques familières produisaient « Bon, » à chaque section.

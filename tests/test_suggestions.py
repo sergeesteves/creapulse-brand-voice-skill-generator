@@ -17,7 +17,7 @@ from app.scraper import PageText, word_count
 GUIDE_AVEC = """## Ton
 - **Adresse directe** : « Vous me direz »
 ## Style de phrase
-- **Incises familières**, à varier : « Bon, », « En gros », « Ceci dit », « D'ailleurs (à valider) »
+- **Incises familières**, à varier : « Bon, », « En gros », « Ceci dit », D'ailleurs [suggestion]
 ## Vocabulaire
 - **Jugement** : « inutile », « néfaste »
 ## Structure / format
@@ -27,7 +27,7 @@ GUIDE_AVEC = """## Ton
 ## Résumé en une phrase
 Une voix directe."""
 
-GUIDE_SANS = GUIDE_AVEC.replace(", « D'ailleurs (à valider) »", "")
+GUIDE_SANS = GUIDE_AVEC.replace(", D'ailleurs [suggestion]", "")
 
 
 def test_system_prompt_carries_repertoire_and_suggestion_rules(monkeypatch):
@@ -36,7 +36,8 @@ def test_system_prompt_carries_repertoire_and_suggestion_rules(monkeypatch):
     p = build_system_prompt()
     assert "AU MOINS 5 expressions DIFFÉRENTES" in p
     assert "3 au plus" in p and SUGGESTION_MARK in p
-    assert "constant, fréquent, occasionnel ou rare" in p
+    assert "sans guillemets" in p and "à l'intérieur d'une citation" in p
+    assert "(constant), (fréquent), (occasionnel) ou (rare)" in p
     assert "{" not in p.split("SORTIE")[0]  # tous les gabarits sont remplis
 
 
@@ -48,7 +49,7 @@ def test_count_suggestions():
 def test_note_appears_only_when_suggestions_are_present():
     assert render.suggestion_note(GUIDE_SANS) == ""
     note = render.suggestion_note(GUIDE_AVEC)
-    assert "à valider" in note and "supprimez les autres" in note
+    assert SUGGESTION_MARK in note and "supprimez les autres" in note
 
     avec = render.render_prompt_block("Ex", GUIDE_AVEC)
     sans = render.render_prompt_block("Ex", GUIDE_SANS)

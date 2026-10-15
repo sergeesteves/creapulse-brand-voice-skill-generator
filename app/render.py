@@ -43,9 +43,9 @@ def slugify(value: str) -> str:
 # Templates B1 / B2
 # ---------------------------------------------------------------------------
 
-SUGGESTION_MARK = "(à valider)"
+SUGGESTION_MARK = "[suggestion]"
 
-SUGGESTION_NOTE = """> **Quelques expressions sont suivies de « (à valider) »** : elles ne figurent pas telles quelles
+SUGGESTION_NOTE = """> **Quelques expressions sont suivies de [suggestion]** : elles ne figurent pas telles quelles
 > dans vos articles. L'outil les propose parce qu'il n'en avait pas trouvé assez pour que la liste
 > soit variée, et qu'une liste trop courte fait toujours ressortir la même tournure. Gardez celles
 > que vous auriez pu écrire, supprimez les autres. Tout le reste vient de vos textes."""

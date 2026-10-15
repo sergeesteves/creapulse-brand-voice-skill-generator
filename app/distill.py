@@ -48,18 +48,20 @@ RÈGLES ABSOLUES
 - « Résumé en une phrase » : une seule phrase, sans puce, sans gras, sans citation.
 - Réponds dans la LANGUE des articles.
 - Pas d'introduction ni de conclusion hors des sections : commence directement par « ## Ton ».
-- FRÉQUENCE : pour chaque trait, dis s'il est constant, fréquent, occasionnel ou rare dans les
-  textes. Un trait rare présenté sans sa rareté sera SUR-EMPLOYÉ par le modèle qui lira ce guide :
-  il rend la consigne visible pour prouver qu'il l'a suivie. Précise aussi de varier les tournures
-  d'une occurrence à l'autre plutôt que de reprendre toujours la même.
+- FRÉQUENCE : termine CHAQUE puce par la fréquence observée du trait, entre parenthèses, en un seul
+  mot : (constant), (fréquent), (occasionnel) ou (rare). Sans cette indication, le modèle qui lira
+  ce guide sur-emploiera les traits rares : il rend la consigne visible pour prouver qu'il l'a
+  suivie. Compte vraiment : un trait croisé une ou deux fois dans tout le corpus est (rare).
 - RÉPERTOIRE : pour les traits à variantes (incises et tournures familières, vocabulaire de
   jugement, formules de liaison), donne AU MOINS {min_repertoire} expressions DIFFÉRENTES tirées
   des textes. Une liste de deux ou trois expressions se recycle : le modèle pioche toujours la même.
 - SUGGESTIONS : si les textes ne fournissent pas {min_repertoire} expressions pour un de ces
   traits, complète avec {max_suggestions} au plus, de la même famille d'intention et du même
-  registre, chacune suivie de « (à valider) ». Ne remplace JAMAIS une expression observée par une
-  suggestion, et n'en ajoute nulle part ailleurs. Hors de ces listes, la règle « n'invente rien »
-  reste absolue.
+  registre, chacune suivie du marqueur {mark} écrit tel quel, sans guillemets. Ne remplace JAMAIS
+  une expression observée par une suggestion, et n'en ajoute nulle part ailleurs. Hors de ces
+  listes, la règle « n'invente rien » reste absolue.
+- Le marqueur {mark} sert UNIQUEMENT à signaler une expression que tu proposes. Ne l'écris jamais
+  à l'intérieur d'une citation, et ne le cite jamais comme une tournure de l'auteur.
 - LONGUEUR : le guide complet doit tenir en MOINS DE {max_chars} CARACTÈRES. Vise 3 à 5 traits par
   section et 1 à 2 citations par trait. La spécificité prime sur l'exhaustivité : quatre traits
   ancrés valent mieux qu'une liste complète et vague. Un guide trop long noie le modèle qui l'applique.
@@ -72,7 +74,10 @@ SORTIE (Markdown, exactement ces sections, dans cet ordre, titres en H2 tels que
 ## Principes édito / positionnement
 ## Résumé en une phrase   (la voix en 1 phrase — servira de description courte)
 
-Dans chaque section : des puces concrètes, en gras le trait, puis l'ancrage entre guillemets."""
+Format d'une puce, à suivre exactement :
+- **Le trait en gras** : « citation », « autre citation » (fréquent)
+Et pour un répertoire complété par une suggestion :
+- **Le trait en gras** : « citation », « citation », « citation », « citation », proposition {mark} (occasionnel)"""
 
 # Passe de raccourcissement : n'envoie QUE le guide, jamais les articles (le modèle n'a rien à
 # re-vérifier, il ne fait que couper) — l'appel coûte ~1,5 k tokens au lieu de ~11 k.
@@ -111,13 +116,14 @@ TRIM_ORDER = [
 MIN_BULLETS = 2  # plancher : en dessous, une section ne dit plus rien d'utile
 
 
-SUGGESTION_MARK = "(à valider)"
+SUGGESTION_MARK = "[suggestion]"
 
 
 def build_system_prompt() -> str:
     return SYSTEM_PROMPT.format(max_chars=settings.max_guide_chars,
                                 min_repertoire=settings.min_repertoire,
-                                max_suggestions=settings.max_suggestions)
+                                max_suggestions=settings.max_suggestions,
+                                mark=SUGGESTION_MARK)
 
 
 def count_suggestions(guide: str) -> int:
