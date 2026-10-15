@@ -48,10 +48,9 @@ RÈGLES ABSOLUES
 - « Résumé en une phrase » : une seule phrase, sans puce, sans gras, sans citation.
 - Réponds dans la LANGUE des articles.
 - Pas d'introduction ni de conclusion hors des sections : commence directement par « ## Ton ».
-- FRÉQUENCE : termine CHAQUE puce par la fréquence observée du trait, entre parenthèses, en un seul
-  mot : (constant), (fréquent), (occasionnel) ou (rare). Sans cette indication, le modèle qui lira
-  ce guide sur-emploiera les traits rares : il rend la consigne visible pour prouver qu'il l'a
-  suivie. Compte vraiment : un trait croisé une ou deux fois dans tout le corpus est (rare).
+- RARETÉ : ne présente pas comme caractéristique une tournure croisée une seule fois dans tout le
+  corpus. Un trait mérite sa place s'il revient, ou s'il est si distinctif qu'il signe la voix ;
+  dans ce second cas, dis dans la puce qu'il est rare.
 - RÉPERTOIRE : pour les traits à variantes (incises et tournures familières, vocabulaire de
   jugement, formules de liaison), donne AU MOINS {min_repertoire} expressions DIFFÉRENTES tirées
   des textes. Une liste de deux ou trois expressions se recycle : le modèle pioche toujours la même.
@@ -74,10 +73,10 @@ SORTIE (Markdown, exactement ces sections, dans cet ordre, titres en H2 tels que
 ## Principes édito / positionnement
 ## Résumé en une phrase   (la voix en 1 phrase — servira de description courte)
 
-Format d'une puce, à suivre exactement :
-- **Le trait en gras** : « citation », « autre citation » (fréquent)
+Format d'une puce :
+- **Le trait en gras** : « citation », « autre citation »
 Et pour un répertoire complété par une suggestion :
-- **Le trait en gras** : « citation », « citation », « citation », « citation », proposition {mark} (occasionnel)"""
+- **Le trait en gras** : « citation », « citation », « citation », « citation », proposition {mark}"""
 
 # Passe de raccourcissement : n'envoie QUE le guide, jamais les articles (le modèle n'a rien à
 # re-vérifier, il ne fait que couper) — l'appel coûte ~1,5 k tokens au lieu de ~11 k.

@@ -56,6 +56,14 @@ def suggestion_note(guide_md: str) -> str:
     return SUGGESTION_NOTE if SUGGESTION_MARK in guide_md else ""
 
 
+# Règle de dosage, ajoutée par l'outil et non par le modèle : la distillation sait repérer les
+# traits, pas estimer leur fréquence (vérifié deux fois en production, le modèle ignore la consigne).
+# Sans dosage, un modèle rend chaque trait visible pour prouver qu'il a suivi la consigne.
+DOSAGE_BLOCK = """> **Comment doser**
+> Les tournures citées sont des **exemples à varier**, pas des passages obligés. Employez-en
+> quelques-unes par texte, pas une par paragraphe, et évitez de reprendre deux fois la même.
+> Un marqueur qui revient à chaque section cesse d'être une voix et devient un tic."""
+
 USAGE_BLOCK = """> **Comment l'utiliser**
 > - **ChatGPT** : collez ce bloc dans les instructions d'un *Projet* ou d'un *GPT* (ou dans *Instructions personnalisées* pour toutes vos conversations).
 > - **Claude** : créez un *Projet* et collez-le dans ses instructions (ou importez la version « skill » dans Paramètres → Skills).
@@ -70,6 +78,8 @@ def render_prompt_block(name: str, guide_md: str, extra_section: str = "") -> st
     note = f"\n{note}\n" if note else ""
     return f"""# Voix de marque — {name}
 {USAGE_BLOCK}
+
+{DOSAGE_BLOCK}
 {note}
 Adoptez systématiquement la voix suivante pour rédiger/réviser du contenu {name}.
 N'inventez pas de traits absents ; en cas de doute, restez neutre.
@@ -104,6 +114,8 @@ description: "{description}"
 
 Applique cette voix pour toute rédaction/révision {name}. COMMENT écrire, pas QUOI.
 N'invente pas de traits absents ; en cas de doute, reste neutre.
+
+{DOSAGE_BLOCK}
 {note}
 {body}
 

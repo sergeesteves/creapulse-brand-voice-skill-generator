@@ -37,8 +37,16 @@ def test_system_prompt_carries_repertoire_and_suggestion_rules(monkeypatch):
     assert "AU MOINS 5 expressions DIFFÉRENTES" in p
     assert "3 au plus" in p and SUGGESTION_MARK in p
     assert "sans guillemets" in p and "à l'intérieur d'une citation" in p
-    assert "(constant), (fréquent), (occasionnel) ou (rare)" in p
+    assert "ne présente pas comme caractéristique une tournure croisée une seule fois" in p
     assert "{" not in p.split("SORTIE")[0]  # tous les gabarits sont remplis
+
+
+def test_dosage_block_is_always_present_and_deterministic():
+    """Le modèle ignore la consigne de fréquence (vérifié deux fois en prod) : l'outil la pose."""
+    for art in (render.render_prompt_block("Ex", GUIDE_SANS),
+                render.render_skill("Ex", "ex", "V.", GUIDE_SANS)):
+        assert "Comment doser" in art and "devient un tic" in art
+        assert "exemples à varier" in art
 
 
 def test_count_suggestions():
