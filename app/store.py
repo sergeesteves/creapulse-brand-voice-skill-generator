@@ -1,4 +1,4 @@
-"""Store minuscule : 4 tables (usage_counters, leads, generation_costs, profiles).
+"""Store minuscule : 5 tables (usage_counters, leads, generation_costs, profiles, wallet_outbox).
 
 Postgres en prod (DATABASE_URL=postgresql://…), SQLite en dev/tests (défaut).
 Aucun contenu scrapé n'est stocké. Le profil généré l'est pour un compte identifié seulement (son
@@ -64,6 +64,15 @@ SCHEMA = [
         purged_at        TEXT
     )""",
     "CREATE INDEX IF NOT EXISTS profiles_owner ON profiles (owner, created_at)",
+    # File de renvoi vers le porte-monnaie (refund, cost) quand WordPress n'a pas répondu
+    """CREATE TABLE IF NOT EXISTS wallet_outbox (
+        id         TEXT PRIMARY KEY,
+        route      TEXT NOT NULL,
+        body       TEXT NOT NULL,
+        attempts   INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        last_error TEXT
+    )""",
 ]
 
 PROFILE_LIST_COLUMNS = ["id", "created_at", "name", "slug", "pages", "summary", "retention_months", "purged_at"]
@@ -275,6 +284,28 @@ class Store:
                 for pid in expired:
                     c.execute(upd, (ts, pid))
         return len(expired)
+
+    # --- file de renvoi du porte-monnaie ------------------------------------
+    def enqueue_wallet(self, route: str, body: str, error: str) -> None:
+        sql = self._q("INSERT INTO wallet_outbox (id, route, body, attempts, created_at, last_error) "
+                      "VALUES (%s, %s, %s, 1, %s, %s)")
+        with self._conn() as c:
+            c.execute(sql, (secrets.token_urlsafe(12), route, body, now_iso(), error[:200]))
+
+    def pending_wallet(self, limit: int = 100) -> list[dict]:
+        cols = ["id", "route", "body", "attempts"]
+        sql = self._q("SELECT id, route, body, attempts FROM wallet_outbox ORDER BY created_at LIMIT %s")
+        with self._conn() as c:
+            return [dict(zip(cols, row)) for row in c.execute(sql, (limit,)).fetchall()]
+
+    def bump_wallet(self, item_id: str, error: str) -> None:
+        sql = self._q("UPDATE wallet_outbox SET attempts = attempts + 1, last_error = %s WHERE id = %s")
+        with self._conn() as c:
+            c.execute(sql, (error[:200], item_id))
+
+    def drop_wallet(self, item_id: str) -> None:
+        with self._conn() as c:
+            c.execute(self._q("DELETE FROM wallet_outbox WHERE id = %s"), (item_id,))
 
     @staticmethod
     def _profile_row(row: dict) -> dict:

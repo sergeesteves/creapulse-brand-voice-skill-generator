@@ -16,6 +16,7 @@ from app.costs import COST_HEADER, CostMeter, header_cost
 from app.distill import SECTIONS, DistillError, Guide, canonical_markdown, distill
 from app.scraper import PageText, word_count
 from app.store import get_store
+from conftest import login
 
 PROSE = " ".join(["Une phrase d'article écrite pour de vrai, avec un vrai rythme."] * 60)
 GUIDE = canonical_markdown({s: ("Une voix directe." if s == "Résumé en une phrase" else "- **trait** : « exemple »")
@@ -102,6 +103,7 @@ def api(monkeypatch):
     monkeypatch.setattr(main, "rate_limiter", gating.RateLimiter(1000))
     monkeypatch.setattr(settings, "min_urls", 1)
     with TestClient(main.app) as c:
+        login(c)
         yield c, main
 
 

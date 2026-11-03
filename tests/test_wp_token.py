@@ -63,7 +63,7 @@ def test_index_consumes_token_sets_member_session_and_redirects(client):
     assert r.headers["referrer-policy"] == "no-referrer" and r.headers["cache-control"] == "no-store"
     assert gating.SESSION_COOKIE in r.cookies
     sess = gating.read_session(r.cookies[gating.SESSION_COOKIE])
-    assert sess.email == "membre@example.com" and sess.is_member and sess.levels == (1,)
+    assert sess.email == "membre@example.com" and sess.user_id == REF_PAYLOAD["sub"] and sess.levels == (1,)
     lead = get_store().get_lead("membre@example.com")
     assert lead["source"] == "wordpress" and lead["verified_at"] and lead["consent_at"]
     html = client.get("/?embed=1").text
@@ -114,13 +114,12 @@ def test_bad_token_is_ignored_not_500(client):
     assert r.headers["location"] == "/?embed=1"
 
 
-def test_anonymous_gets_wordpress_links_when_provided(client):
+def test_a_visitor_gets_wordpress_links_when_provided(client):
     login = "https%3A%2F%2Fwww.creapulse.fr%2Flogin%2F%3Fredirect_to%3Dx"
     reg = "https%3A%2F%2Fwww.creapulse.fr%2Fmembership-checkout%2F%3Fpmpro_level%3D1"
     html = client.get(f"/?embed=1&login_url={login}&register_url={reg}").text
     assert 'href="https://www.creapulse.fr/login/?redirect_to=x" target="_top">Se connecter' in html
     assert 'href="https://www.creapulse.fr/membership-checkout/?pmpro_level=1" target="_top">Créer un compte' in html
-    assert 'id="email-form" hidden' in html      # la capture email cède la place au compte Creapulse
     # URL hors site → ignorée
     html = client.get("/?embed=1&login_url=https%3A%2F%2Fevil.example%2Fphish").text
     assert "evil.example" not in html
@@ -137,14 +136,12 @@ def test_staging_links_are_accepted_too(client):
     assert "evil.example" not in html
 
 
-def test_required_mode_blocks_anonymous_and_non_members(client, monkeypatch):
-    monkeypatch.setattr(settings, "auth_mode", "required")
+def test_required_levels_block_other_members(client, monkeypatch):
     monkeypatch.setattr(settings, "required_levels", (2,))
     html = client.get("/").text
     assert "Réservé aux membres" in html and 'id="form-card" hidden' in html
     r = client.post("/api/generate", json={"urls": ["https://example.org/a"]})
     assert r.status_code == 403 and r.json()["code"] == "need_login"
-    assert client.post("/api/magic-link", json={"email": "x@y.fr", "consent": True}).status_code == 403
     # membre niveau 1 seulement → toujours bloqué ; membre niveau 2 → ok
     client.get(f"/?wp_token={REF_TOKEN}", follow_redirects=False)
     assert "Réservé aux membres" in client.get("/").text

@@ -32,7 +32,6 @@ def _bool(name: str, default: bool) -> bool:
 class Settings:
     # --- Identité / URLs publiques ---
     app_name: str = "Générateur de skill de voix de marque IA"
-    public_base_url: str = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
     # Préfixe de chemin si l'app est servie sous un sous-dossier (ex. /outils/voix-de-marque) ; vide sinon.
     root_path: str = ("/" + os.getenv("ROOT_PATH", "").strip("/")) if os.getenv("ROOT_PATH", "").strip("/") else ""
     cta_url: str = os.getenv("CTA_URL", "https://www.creapulse.fr/contact/")
@@ -42,9 +41,8 @@ class Settings:
     # --- Secrets ---
     secret_key: str = os.getenv("SECRET_KEY", "")
 
-    # --- Identité WordPress (jeton signé émis par creapulse-tools) ---
+    # --- Identité WordPress (jeton signé émis par creapulse-tools) : compte obligatoire ---
     wp_token_secret: str = os.getenv("WP_TOKEN_SECRET", "")
-    auth_mode: str = (os.getenv("AUTH_MODE", "optional").strip().lower() or "optional")  # open | optional | required
     required_levels: tuple[int, ...] = tuple(
         int(x) for x in os.getenv("REQUIRED_LEVELS", "").replace(";", ",").split(",") if x.strip().isdigit()
     )
@@ -57,8 +55,13 @@ class Settings:
                                      "https://www.creapulse.fr/,https://staging.creapulse.fr/").split(",")
         if p.strip().startswith("https://")
     )
-    # Déclaration d'usage à WordPress (creapulse-tools `tool-event` → Nimble). URL vide = désactivé.
-    wp_tool_event_url: str = os.getenv("WP_TOOL_EVENT_URL", "https://www.creapulse.fr/wp-json/creapulse-tools/v1/tool-event").strip()
+    # Site WordPress qui porte le porte-monnaie et la déclaration d'usage : staging pour la recette, www en prod.
+    wp_base_url: str = os.getenv("WP_BASE_URL", "https://www.creapulse.fr").strip().rstrip("/")
+    # Déclaration d'usage à WordPress (creapulse-tools `tool-event` → Nimble). "off" = désactivé.
+    wp_tool_event_url: str = ("" if os.getenv("WP_TOOL_EVENT_URL", "").strip() == "off" else
+                              os.getenv("WP_TOOL_EVENT_URL", "").strip()
+                              or os.getenv("WP_BASE_URL", "https://www.creapulse.fr").strip().rstrip("/")
+                              + "/wp-json/creapulse-tools/v1/tool-event")
     tool_slug: str = os.getenv("TOOL_SLUG", "voix-de-marque").strip()
     wp_tool_event_timeout_s: float = _float("WP_TOOL_EVENT_TIMEOUT_S", 3.0)
 
@@ -105,23 +108,17 @@ class Settings:
     max_words_total: int = _int("MAX_WORDS_TOTAL", 9000)
     max_link_density: float = _float("MAX_LINK_DENSITY", 0.35)
 
-    # --- Gating (coût + leads) ---
-    anon_free_generations: int = _int("ANON_FREE_GENERATIONS", 1)
-    anon_ip_daily_cap: int = _int("ANON_IP_DAILY_CAP", 2)
+    # --- Porte-monnaie de crédits commun (creapulse-tools 079). Le prix se règle dans wp-admin, jamais ici. ---
+    credits_secret: str = os.getenv("CREAPULSE_CREDITS_SECRET_VOIX", "")
+    credits_tool_slug: str = os.getenv("CREDITS_TOOL_SLUG", "voix").strip()
+    credits_tier: str = os.getenv("CREDITS_TIER", "generation").strip()
+    credits_timeout_s: float = _float("CREDITS_TIMEOUT_S", 8.0)
+
+    # --- Plafonds (protègent le budget LLM, en plus des crédits) ---
     account_daily_cap: int = _int("ACCOUNT_DAILY_CAP", 3)
     global_daily_cap: int = _int("GLOBAL_DAILY_CAP", 40)
     ip_rate_limit_per_min: int = _int("IP_RATE_LIMIT_PER_MIN", 6)
-    magic_link_ttl_s: int = _int("MAGIC_LINK_TTL_S", 30 * 60)
-    session_ttl_s: int = _int("SESSION_TTL_S", 30 * 24 * 3600)
     cookie_secure: bool = _bool("COOKIE_SECURE", True)
-
-    # --- Email (magic-link) ---
-    smtp_host: str = os.getenv("SMTP_HOST", "")
-    smtp_port: int = _int("SMTP_PORT", 587)
-    smtp_user: str = os.getenv("SMTP_USER", "")
-    smtp_password: str = os.getenv("SMTP_PASSWORD", "")
-    smtp_from: str = os.getenv("SMTP_FROM", "Creapulse <no-reply@creapulse.fr>")
-    smtp_tls: bool = _bool("SMTP_TLS", True)
 
     # --- Historique des profils (comptes identifiés seulement) ---
     # Mêmes noms et même logique que l'outil de clustering : conservation selon le niveau PMPro,
@@ -148,11 +145,6 @@ class Settings:
         return max(values, default=self.free_retention_months)
 
     @property
-    def mail_mode(self) -> str:
-        """smtp = magic-link envoyé par email (email vérifié) ; direct = email capturé sans vérification."""
-        return "smtp" if self.smtp_host else "direct"
-
-    @property
     def cookie_path(self) -> str:
         return self.root_path or "/"
 
@@ -165,10 +157,10 @@ class Settings:
             problems.append("CRAWL4AI_TOKEN manquant")
         if not self.llm_api_key:
             problems.append("LLM_API_KEY manquante (clé omniroute)")
-        if self.auth_mode not in ("open", "optional", "required"):
-            problems.append(f"AUTH_MODE invalide : {self.auth_mode}")
-        if self.auth_mode == "required" and not self.wp_token_secret:
-            problems.append("AUTH_MODE=required exige WP_TOKEN_SECRET")
+        if not self.wp_token_secret:
+            problems.append("WP_TOKEN_SECRET manquant (compte WordPress obligatoire)")
+        if len(self.credits_secret) < 32:
+            problems.append("CREAPULSE_CREDITS_SECRET_VOIX manquant ou trop court (>= 32 caractères)")
         return problems
 
 

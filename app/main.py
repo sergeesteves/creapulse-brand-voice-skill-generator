@@ -1,7 +1,7 @@
 """Générateur de skill de voix de marque IA — micro-app stateless (FastAPI).
 
-Flux : URLs → crawl4ai (scrape) → omniroute (distillation, T° basse) → 2 formats self-contained.
-Gating : 1 génération anonyme, puis email (magic-link) ; caps compte / IP / global.
+Flux : URLs → crawl4ai (scrape) → débit du porte-monnaie → omniroute (distillation, T° basse) → 2 formats
+self-contained. Compte WordPress obligatoire (jeton signé du shortcode) ; plafonds par compte et global.
 """
 from __future__ import annotations
 
@@ -21,12 +21,11 @@ from fastapi.templating import Jinja2Templates
 from starlette.background import BackgroundTask
 
 from . import distill as distill_mod
-from . import gating, render
+from . import gating, render, wallet
 from . import wp_token as wp_token_mod
 from .config import settings
 from .costs import CostMeter
 from .distill import DistillError, distill
-from .mailer import send_magic_link
 from .scraper import InputError, ScrapeError, check_corpus, fetch_pages, parse_urls
 from .store import get_store
 from .wp_events import notify_tool_event
@@ -50,7 +49,7 @@ async def lifespan(app: FastAPI):
         else:
             log.error(msg)
     if not settings.secret_key:
-        # Jamais en prod (les cookies/magic-links seraient invalidés à chaque redémarrage)
+        # Jamais en prod (les sessions seraient invalidées à chaque redémarrage)
         settings.secret_key = secrets.token_urlsafe(32)
         log.warning("SECRET_KEY absente → clé éphémère générée (dev uniquement)")
     store = get_store()
@@ -63,6 +62,7 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # pragma: no cover
         log.warning("purge des profils expirés impossible : %s", exc)
     app.state.http = httpx.AsyncClient(timeout=max(settings.crawl_timeout_s, settings.llm_timeout_s))
+    await _replay_wallet(app.state.http)
     yield
     await app.state.http.aclose()
     store.close()
@@ -113,16 +113,9 @@ def _session(request: Request) -> gating.Session | None:
     return gating.read_session(request.cookies.get(gating.SESSION_COOKIE))
 
 
-def _session_email(request: Request) -> str | None:
-    sess = _session(request)
-    return sess.email if sess else None
-
-
 def _access_ok(sess: gating.Session | None) -> bool:
-    """Mode required : il faut une session membre (jeton WordPress) avec un niveau requis, le cas échéant."""
-    if settings.auth_mode != "required":
-        return True
-    return bool(sess and sess.is_member and sess.has_level(settings.required_levels))
+    """Il faut une session membre (jeton WordPress) avec un niveau requis, le cas échéant."""
+    return bool(sess and sess.has_level(settings.required_levels))
 
 
 def _wp_link(request: Request, name: str) -> str:
@@ -156,18 +149,16 @@ async def index(request: Request):
             store.upsert_lead(ident.email, consent=True, source="wordpress")
             store.mark_verified(ident.email, source="wordpress")
             _set_cookie(resp, gating.SESSION_COOKIE,
-                        gating.sign_session(ident.email, "wordpress", ident.levels, ident.name),
+                        gating.sign_session(ident.email, ident.user_id, ident.levels, ident.name),
                         settings.member_session_ttl_s)
-            resp.delete_cookie(gating.ANON_COOKIE, path=settings.cookie_path)
             log.info("wp token ok user=%s levels=%s", ident.user_id, list(ident.levels))
             # Déclare l'usage à WordPress (→ Nimble) APRÈS l'envoi de la réponse : jamais bloquant, jeton encore valide
             resp.background = BackgroundTask(notify_tool_event, request.app.state.http, wp_token)
         else:
-            log.warning("wp token rejeté (signature/expiration/format) — comportement anonyme")
+            log.warning("wp token rejeté (signature/expiration/format) : page de connexion")
         return resp
 
     sess = _session(request)
-    anon = gating.read_anon(request.cookies.get(gating.ANON_COOKIE))
     login_url, register_url = _wp_link(request, "login_url"), _wp_link(request, "register_url")
     resp = templates.TemplateResponse(
         request,
@@ -176,19 +167,12 @@ async def index(request: Request):
             "settings": settings,
             "root": settings.root_path,
             "static_version": STATIC_VERSION,
-            "mail_mode": settings.mail_mode,
             "embed": request.query_params.get("embed") == "1",
             "email": sess.email if sess else None,
             "session": sess,
-            "is_member": bool(sess and sess.is_member),
             "locked": not _access_ok(sess),
-            "auth_mode": settings.auth_mode,
             "login_url": login_url,
             "register_url": register_url,
-            "anon_used": anon,
-            "anon_free": settings.anon_free_generations,
-            "connected": request.query_params.get("connected") == "1",
-            "auth_error": request.query_params.get("auth") == "invalid",
             "max_urls": settings.max_urls,
             "min_urls": settings.min_urls,
             "min_words": settings.min_words_per_page,
@@ -202,7 +186,7 @@ async def index(request: Request):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "app": "voice-skill-generator", "mail_mode": settings.mail_mode}
+    return {"status": "ok", "app": "voice-skill-generator"}
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +202,64 @@ def _record_cost(store, status: str, pages: list, model: str | None, meter: Cost
                                      model=model or settings.llm_model, meter=meter)
     except Exception as exc:  # le relevé de coût ne doit pas priver le visiteur de son profil
         log.warning("coût de génération non enregistré : %s", exc)
+
+
+# --- Porte-monnaie -----------------------------------------------------------
+
+def _usage_ref() -> str:
+    """Un par génération : `{analyse}:{essai}`. Chaque génération est une analyse neuve, donc l'essai 1."""
+    return f"voix{secrets.token_hex(8)}:1"
+
+
+def _wallet_refusal(exc: wallet.WalletError) -> JSONResponse:
+    """Traduit un refus du porte-monnaie pour le membre. Rien n'a été lancé."""
+    if exc.status == 402:
+        required, left = exc.data.get("required"), exc.data.get("balance")
+        return _error(402, "need_credits",
+                      f"Une génération demande {required} crédits, il vous en reste {left}.",
+                      balance=left, required=required, recharge_url=exc.data.get("recharge_url"))
+    if exc.status == 403:
+        reason = exc.data.get("closed_reason")
+        msg = ("Les essais gratuits sont en pause jusqu'au mois prochain. Les crédits achetés restent utilisables."
+               if reason == "free_budget" else "L'outil est momentanément fermé. Réessayez plus tard.")
+        return _error(403, "closed", msg, closed_reason=reason, recharge_url=exc.data.get("recharge_url"))
+    if exc.status in (404, 410):
+        return _error(403, "unknown_member", "Votre compte n'est pas reconnu. Reconnectez-vous depuis creapulse.fr.")
+    if exc.status == 401:
+        log.error("porte-monnaie : outil non authentifié (secret ou slug)")
+    return _error(503, "wallet", "Le porte-monnaie de crédits ne répond pas. Rien n'a été lancé ni débité : "
+                                 "réessayez dans quelques minutes.")
+
+
+async def _replay_wallet(http: httpx.AsyncClient) -> None:
+    try:
+        await wallet.replay_outbox(http, get_store())
+    except Exception as exc:  # pragma: no cover — la file ne doit jamais bloquer l'app
+        log.warning("file du porte-monnaie non rejouée : %s", exc)
+
+
+async def _report_cost(http: httpx.AsyncClient, user_id: int, usage_ref: str, meter: CostMeter) -> None:
+    """La file en attente, puis le coût réel de la génération (échecs compris). Après la réponse.
+    Dans cet ordre, un envoi qui vient d'échouer attend le prochain passage au lieu d'être rejoué aussitôt."""
+    await _replay_wallet(http)
+    if meter.llm_calls:
+        await wallet.report_cost(http, get_store(), user_id, usage_ref, meter.contract())
+
+
+@app.get("/api/credits")
+async def api_credits(request: Request):
+    sess = _session(request)
+    if not _access_ok(sess):
+        return _error(403, "need_login", "Connectez-vous depuis creapulse.fr pour utiliser l'outil.")
+    try:
+        data = await wallet.balance(request.app.state.http, sess.user_id)
+    except wallet.WalletError as exc:
+        log.warning("solde illisible : %s", exc)
+        return _error(503, "wallet", "Solde indisponible pour le moment.")
+    tier = settings.credits_tier
+    return {"ok": True, "balance": data.get("balance"), "cost": (data.get("costs") or {}).get(tier),
+            "can_start": bool((data.get("can_start") or {}).get(tier)), "recharge_url": data.get("recharge_url"),
+            "closed_reason": data.get("closed_reason")}
 
 
 @app.post("/api/generate")
@@ -240,23 +282,24 @@ async def api_generate(request: Request, payload: dict = Body(...)):
 
     sess = _session(request)
     if not _access_ok(sess):
-        return _error(403, "need_login", "Cet outil est réservé aux membres. Connectez-vous ou créez un compte.")
-    email = sess.email if sess else None
-    anon_count = gating.read_anon(request.cookies.get(gating.ANON_COOKIE))
+        return _error(403, "need_login", "Connectez-vous depuis creapulse.fr pour utiliser l'outil.")
     store = get_store()
     gate = gating.Gate(store)
-    decision, reserved = gate.check_and_reserve(email=email, anon_count=anon_count, ip=ip)
+    decision, reserved = gate.check_and_reserve(email=sess.email)
     if not decision.allowed:
-        status = 429 if decision.reason in ("global_cap", "account_cap", "ip_cap") else 403
-        return _error(status, decision.reason, decision.message, cta_url=settings.cta_url)
+        return _error(429, decision.reason, decision.message)
 
     http: httpx.AsyncClient = request.app.state.http
     meter = CostMeter()
     good: list = []
+    usage_ref = _usage_ref()
+    debited: dict = {}
     try:
         pages = await fetch_pages(urls, client=http)
         good = check_corpus(pages)
         name, slug = render.brand_from_urls([p.url for p in good])
+        # Débit juste avant le modèle : lire et vérifier les pages ne coûte rien, une entrée refusée ne débite pas
+        debited = await wallet.debit(http, sess.user_id, usage_ref)
         guide = await distill(good, name, client=http, meter=meter)
     except InputError as exc:
         gate.release(reserved)
@@ -265,34 +308,47 @@ async def api_generate(request: Request, payload: dict = Body(...)):
         gate.release(reserved)
         log.error("scrape: %s", exc)
         return _error(503, "scrape", "Impossible de lire les pages pour le moment. Réessayez dans quelques minutes.")
+    except wallet.WalletError as exc:
+        gate.release(reserved)
+        log.warning("debit %s refusé : %s %s", usage_ref, exc, exc.data)
+        if exc.retryable:  # issue inconnue : le remboursement empêche un débit tardif de compter
+            await wallet.refund(http, store, sess.user_id, usage_ref, "debit_timeout")
+        return _wallet_refusal(exc)
     except DistillError as exc:
         gate.release(reserved)
         log.error("distill: %s", exc)
         _record_cost(store, "distill_failed", good, None, meter)
-        return _error(503, "distill", "La distillation n'a pas produit un profil conforme. "
-                                      "Réessayez (ou essayez avec d'autres articles).")
+        await wallet.refund(http, store, sess.user_id, usage_ref, "distill_failed")
+        resp = _error(503, "distill", "La distillation n'a pas produit un profil conforme, vos crédits sont "
+                                      "remboursés. Réessayez (ou essayez avec d'autres articles).")
+        resp.background = BackgroundTask(_report_cost, http, sess.user_id, usage_ref, meter)
+        return resp
     except Exception as exc:  # pragma: no cover — filet
         gate.release(reserved)
         log.exception("generate failed: %s", exc)
         _record_cost(store, "error", good, None, meter)
-        return _error(500, "internal", "Erreur inattendue. Réessayez plus tard.")
+        if debited:
+            await wallet.refund(http, store, sess.user_id, usage_ref, "error")
+        resp = _error(500, "internal", "Erreur inattendue. Rien ne vous a été débité. Réessayez plus tard.")
+        resp.background = BackgroundTask(_report_cost, http, sess.user_id, usage_ref, meter)
+        return resp
 
     page_views = [_page_view(p) for p in pages]
+    store.bump_lead_generations(sess.email)
     profile_id = None
-    if email:
-        store.bump_lead_generations(email)
-        # Opt-in explicite : sans la case cochée, le profil n'est gardé nulle part
-        if payload.get("save") is True:
-            profile_id = _save_profile(store, sess, name, slug, page_views, guide)
+    # Opt-in explicite : sans la case cochée, le profil n'est gardé nulle part
+    if payload.get("save") is True:
+        profile_id = _save_profile(store, sess, name, slug, page_views, guide)
     _record_cost(store, "ok", good, guide.model, meter)
-    log.info("generation ok ip=%s email=%s pages=%d words=%d guide=%dc model=%s usage=%s cost=%.5f$ (%s, %d appel(s))",
-             gating.ip_key(ip)[:8], "yes" if email else "no", len(good), sum(p.words for p in good),
-             len(guide.markdown), guide.model, guide.usage, meter.llm_usd, meter.llm_source, meter.llm_calls)
+    log.info("generation ok ip=%s user=%s pages=%d words=%d guide=%dc model=%s usage=%s cost=%.5f$ (%s, %d appel(s)) "
+             "ref=%s",
+             gating.ip_key(ip)[:8], sess.user_id, len(good), sum(p.words for p in good), len(guide.markdown),
+             guide.model, guide.usage, meter.llm_usd, meter.llm_source, meter.llm_calls, usage_ref)
 
-    resp = JSONResponse(_result_payload(name, slug, guide.summary, guide.markdown, page_views, bool(email),
-                                        profile_id))
-    if not email:
-        _set_cookie(resp, gating.ANON_COOKIE, gating.sign_anon(decision.anon_count), 365 * 24 * 3600)
+    body = _result_payload(name, slug, guide.summary, guide.markdown, page_views, True, profile_id)
+    body["balance"] = debited.get("balance")
+    resp = JSONResponse(body)
+    resp.background = BackgroundTask(_report_cost, http, sess.user_id, usage_ref, meter)
     return resp
 
 
@@ -334,7 +390,7 @@ def _save_profile(store, sess: gating.Session, name: str, slug: str, pages: list
 
 
 # ---------------------------------------------------------------------------
-# Historique (compte identifié)
+# Historique (opt-in du membre)
 # ---------------------------------------------------------------------------
 
 def _history_item(row: dict) -> dict:
@@ -346,8 +402,8 @@ def _history_item(row: dict) -> dict:
 @app.get("/api/history")
 async def api_history(request: Request):
     sess = _session(request)
-    if not sess:
-        return _error(403, "need_email", "L'historique est réservé aux comptes identifiés.")
+    if not _access_ok(sess):
+        return _error(403, "need_login", "Connectez-vous depuis creapulse.fr pour retrouver vos profils.")
     rows = get_store().list_profiles(sess.email)
     return {"ok": True, "profiles": [_history_item(r) for r in rows],
             "retention_months": settings.retention_months(sess.levels),
@@ -357,8 +413,8 @@ async def api_history(request: Request):
 @app.get("/api/history/{profile_id}")
 async def api_history_profile(request: Request, profile_id: str):
     sess = _session(request)
-    if not sess:
-        return _error(403, "need_email", "L'historique est réservé aux comptes identifiés.")
+    if not _access_ok(sess):
+        return _error(403, "need_login", "Connectez-vous depuis creapulse.fr pour retrouver vos profils.")
     row = get_store().get_profile(sess.email, profile_id[:64])
     if not row:
         return _error(404, "not_found", "Ce profil n'existe pas ou plus.")
@@ -374,76 +430,11 @@ async def api_history_profile(request: Request, profile_id: str):
 @app.delete("/api/history/{profile_id}")
 async def api_history_delete(request: Request, profile_id: str):
     sess = _session(request)
-    if not sess:
-        return _error(403, "need_email", "L'historique est réservé aux comptes identifiés.")
+    if not _access_ok(sess):
+        return _error(403, "need_login", "Connectez-vous depuis creapulse.fr pour retrouver vos profils.")
     if not get_store().delete_profile(sess.email, profile_id[:64]):
         return _error(404, "not_found", "Ce profil n'existe pas ou plus.")
     return {"ok": True}
-
-
-# ---------------------------------------------------------------------------
-# Email / magic-link
-# ---------------------------------------------------------------------------
-
-@app.post("/api/magic-link")
-async def api_magic_link(request: Request, payload: dict = Body(...)):
-    ip = client_ip(request)
-    if not rate_limiter.allow("mail:" + ip):
-        return _error(429, "rate_limited", "Trop de demandes. Patientez une minute.")
-    email = str(payload.get("email") or "").strip().lower()
-    consent = bool(payload.get("consent"))
-    if settings.auth_mode == "required":
-        return _error(403, "need_login", "Cet outil est réservé aux membres : la connexion passe par le site.")
-    if not gating.valid_email(email):
-        return _error(400, "email", "Adresse email invalide.")
-    if not consent:
-        return _error(400, "consent", "Le consentement est requis pour recevoir le lien.")
-    store = get_store()
-    # Anti-spam : 5 envois / jour / email
-    if store.increment("magic", email) > 5:
-        return _error(429, "rate_limited", "Trop de liens demandés pour cette adresse aujourd'hui.")
-    store.upsert_lead(email, consent)
-    if settings.mail_mode == "direct":
-        # Pas de SMTP : l'email est capturé (lead) et l'accès débloqué immédiatement, sans vérification.
-        resp = JSONResponse({"ok": True, "connected": True,
-                             "message": "Merci ! Votre accès est débloqué, la page va se recharger."})
-        _set_cookie(resp, gating.SESSION_COOKIE, gating.sign_session(email), settings.session_ttl_s)
-        resp.delete_cookie(gating.ANON_COOKIE, path=settings.cookie_path)
-        return resp
-    token = gating.make_magic_token(email)
-    link = f"{settings.public_base_url}/auth/verify?token={token}"
-    try:
-        send_magic_link(email, link)
-    except Exception as exc:
-        log.error("mail send failed: %s", exc)
-        return _error(503, "mail", "Impossible d'envoyer l'email pour le moment. Réessayez plus tard.")
-    body: dict[str, Any] = {"ok": True, "connected": False,
-                            "message": "Lien envoyé. Vérifiez votre boîte mail (et les spams)."}
-    if settings.debug:
-        body["debug_link"] = link
-    return JSONResponse(body)
-
-
-@app.get("/auth/verify")
-async def auth_verify(token: str = ""):
-    email = gating.read_magic_token(token)
-    home = settings.root_path or ""
-    if not email:
-        return RedirectResponse(f"{home}/?auth=invalid", status_code=303)
-    store = get_store()
-    store.upsert_lead(email, consent=True)
-    store.mark_verified(email)
-    resp = RedirectResponse(f"{home}/?connected=1", status_code=303)
-    _set_cookie(resp, gating.SESSION_COOKIE, gating.sign_session(email), settings.session_ttl_s)
-    resp.delete_cookie(gating.ANON_COOKIE, path=settings.cookie_path)
-    return resp
-
-
-@app.post("/auth/logout")
-async def auth_logout():
-    resp = JSONResponse({"ok": True})
-    resp.delete_cookie(gating.SESSION_COOKIE, path=settings.cookie_path)
-    return resp
 
 
 # ---------------------------------------------------------------------------
@@ -452,9 +443,8 @@ async def auth_logout():
 
 @app.post("/api/download/skill")
 async def api_download_skill(request: Request, payload: dict = Body(...)):
-    email = _session_email(request)
-    if not email:
-        return _error(403, "need_email", "Le téléchargement du skill nécessite un email vérifié.")
+    if not _access_ok(_session(request)):
+        return _error(403, "need_login", "Connectez-vous depuis creapulse.fr pour télécharger le skill.")
     content = str(payload.get("skill_md") or "")
     if not content.startswith("---\nname: voix-") or len(content) > 60_000:
         return _error(400, "bad_request", "Contenu invalide.")

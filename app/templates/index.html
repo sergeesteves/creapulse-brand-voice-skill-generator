@@ -11,41 +11,34 @@
 <header class="top">
   <a class="brand" href="https://www.creapulse.fr/">creapulse.fr</a>
   <div class="account">
-    {% if is_member %}
+    {% if email %}
       <span class="pill ok">Membre Creapulse : {{ email }}</span>
-    {% elif email %}
-      <span class="pill ok">Connecté : {{ email }}</span>
-      <button class="link" id="logout">Se déconnecter</button>
+      <span class="pill credits" hidden></span>
     {% elif login_url %}
       <a class="link" href="{{ login_url }}" target="_top">Se connecter</a>
       {% if register_url %}<a class="link" href="{{ register_url }}" target="_top">Créer un compte</a>{% endif %}
-    {% else %}
-      <span class="pill">Mode découverte : {{ anon_free - anon_used if anon_free > anon_used else 0 }} génération gratuite</span>
-      <button class="link" id="open-email">J'ai déjà un lien ? / Continuer avec mon email</button>
     {% endif %}
   </div>
 </header>
 
 <main>
   <section class="hero">
-    <p class="kicker">Outil gratuit</p>
+    <p class="kicker">Outil Creapulse</p>
     <h1>Générateur de skill de voix de marque IA</h1>
     <p class="lead">Vous avez déjà une voix. Elle est dans vos articles. Collez {{ min_urls }} à {{ max_urls }} URLs de textes que <strong>vous</strong> avez écrits : l'outil en distille les règles (ton, phrases, vocabulaire, structure, positionnement) et vous rend un profil prêt à coller dans ChatGPT ou Claude — en bloc prompt, ou en skill.</p>
-    <p class="note">Pas de compte pour la première génération. Le contenu de vos pages n'est pas conservé : il est lu, distillé, puis oublié. Le profil non plus, sauf si vous choisissez de le garder dans votre compte.</p>
+    <p class="note">Avec un compte Creapulse, vos crédits de bienvenue couvrent vos premiers essais. Le contenu de vos pages n'est pas conservé : il est lu, distillé, puis oublié. Le profil non plus, sauf si vous choisissez de le garder dans votre compte.</p>
   </section>
 
   {% if embed %}
   <div class="account-embed">
-    {% if is_member %}<span class="pill ok">Membre Creapulse : {{ email }}</span>
-    {% elif email %}<span class="pill ok">Connecté : {{ email }}</span><button class="link" id="logout-embed">Se déconnecter</button>
-    {% elif login_url %}<span class="pill">{{ anon_free - anon_used if anon_free > anon_used else 0 }} génération gratuite sans compte</span><a class="link" href="{{ login_url }}" target="_top">Se connecter</a>{% if register_url %}<a class="link" href="{{ register_url }}" target="_top">Créer un compte</a>{% endif %}
-    {% else %}<span class="pill">{{ anon_free - anon_used if anon_free > anon_used else 0 }} génération gratuite sans email</span><button class="link" id="open-email-embed">Continuer avec mon email</button>{% endif %}
+    {% if email %}<span class="pill ok">Membre Creapulse : {{ email }}</span><span class="pill credits" hidden></span>
+    {% elif login_url %}<a class="link" href="{{ login_url }}" target="_top">Se connecter</a>{% if register_url %}<a class="link" href="{{ register_url }}" target="_top">Créer un compte</a>{% endif %}{% endif %}
   </div>
   {% endif %}
   {% if locked %}
   <section class="card locked">
     <h2>Réservé aux membres</h2>
-    <p>Cet outil est accessible avec un compte Creapulse{% if settings.required_levels %} et l'adhésion correspondante{% endif %}.</p>
+    <p>Cet outil est accessible avec un compte Creapulse{% if settings.required_levels %} et l'adhésion correspondante{% endif %}. À la création du compte, des crédits de bienvenue vous permettent de l'essayer.</p>
     <div class="row">
       {% if login_url %}<a class="secondary button" href="{{ login_url }}" target="_top">Se connecter</a>{% endif %}
       {% if register_url %}<a class="secondary button" href="{{ register_url }}" target="_top">Créer un compte</a>{% endif %}
@@ -53,8 +46,6 @@
     </div>
   </section>
   {% endif %}
-  {% if connected %}<div class="flash ok">Email vérifié. Vous pouvez générer plusieurs profils et télécharger le skill.</div>{% endif %}
-  {% if auth_error %}<div class="flash err">Ce lien est invalide ou expiré. Redemandez-en un ci-dessous.</div>{% endif %}
 
   <section class="card" id="form-card" {% if locked %}hidden{% endif %}>
     <h2>1. Vos articles</h2>
@@ -75,9 +66,11 @@
       <div class="row">
         <button type="submit" class="primary" id="submit">Distiller ma voix</button>
         <span id="progress" class="progress" hidden><span class="spinner"></span> <span id="progress-text">Lecture des pages…</span></span>
+        <span class="hint" id="credits-hint" hidden></span>
       </div>
     </form>
     <div id="error" class="flash err" hidden></div>
+    <p class="row" id="recharge-row" hidden><a class="secondary button" id="recharge-link" href="#" target="_top">Recharger mes crédits</a></p>
   </section>
 
   {% if email and not locked %}
@@ -112,7 +105,6 @@
         <button class="ghost copy" data-target="out-skill">Copier</button>
         <button class="ghost dl" id="download-skill-zip" data-format="zip">Télécharger pour Claude (.zip)</button>
         <button class="ghost dl" id="download-skill" data-format="md">Télécharger SKILL.md</button>
-        <span class="tag" id="download-lock" hidden>email requis</span>
       </div>
       <pre id="out-skill"></pre>
     </div>
@@ -146,7 +138,8 @@
     <details><summary>Que fait exactement l'outil ?</summary><p>Il lit le texte principal de vos pages, puis un modèle de langage en distille les règles de votre voix sur 5 axes : ton, style de phrase, vocabulaire (mots-signature et mots à éviter), structure, principes éditoriaux. Chaque trait est ancré sur des tournures réellement présentes dans vos textes. Rien n'est inventé.</p></details>
     <details><summary>Pourquoi mes URLs sont refusées ?</summary><p>Parce que l'extraction est vide ou trop courte : page d'accueil, catégorie, page vitrine, paywall, ou site qui bloque les robots. Une mauvaise extraction donnerait un profil bidon, on préfère refuser proprement. Prenez des articles complets, de {{ min_words }} mots minimum.</p></details>
     <details><summary>Le résultat est-il stable ?</summary><p>Oui, la distillation tourne à température basse : mêmes URLs, même profil (à quelques mots près).</p></details>
-    <details><summary>Que stockez-vous ?</summary><p>Rien du contenu de vos pages, et rien du profil généré par défaut : seulement des compteurs d'usage anonymes. Si vous êtes connecté et cochez « Garder ce profil », ce profil-là est rangé dans « Mes profils », avec l'adresse et le titre des articles lus ; il est effacé au bout de la durée de conservation indiquée, et vous pouvez le supprimer vous-même à tout moment. Sans la case, rien n'est gardé. Votre email sert au lien d'accès et à un éventuel contact. Voir la <a href="{{ settings.privacy_url }}" target="_blank" rel="noopener">politique de confidentialité</a>.</p></details>
+    <details><summary>Que stockez-vous ?</summary><p>Rien du contenu de vos pages, et rien du profil généré par défaut : seulement des compteurs d'usage anonymes. Si vous cochez « Garder ce profil », ce profil-là est rangé dans « Mes profils », avec l'adresse et le titre des articles lus ; il est effacé au bout de la durée de conservation indiquée, et vous pouvez le supprimer vous-même à tout moment. Sans la case, rien n'est gardé. Votre compte Creapulse sert à vous identifier et à tenir votre solde de crédits. Voir la <a href="{{ settings.privacy_url }}" target="_blank" rel="noopener">politique de confidentialité</a>.</p></details>
+    <details><summary>Combien coûte une génération ?</summary><p>Chaque génération consomme des crédits de votre porte-monnaie Creapulse, le même pour tous les outils ; le prix s'affiche à côté du bouton. Rien n'est débité si vos pages sont refusées, et une génération qui échoue est remboursée. À la création du compte, des crédits de bienvenue vous permettent d'essayer.</p></details>
     <details><summary>Skill ou bloc prompt ?</summary><p>Le bloc prompt marche partout, c'est le défaut. Le skill est le même contenu, emballé pour Claude Code et les runtimes qui chargent des skills automatiquement. Tout est dedans dans les deux cas, aucun fichier externe.</p></details>
   </section>
 </main>
@@ -155,39 +148,12 @@
   <p>Un outil de <a href="https://www.creapulse.fr/">Creapulse</a> — Serge Esteves. <a href="{{ settings.privacy_url }}" target="_blank" rel="noopener">Confidentialité</a> · <a href="{{ settings.cta_url }}" target="_blank" rel="noopener">Contact</a></p>
 </footer>
 
-<!-- Modale email -->
-<div class="modal" id="email-modal" hidden>
-  <div class="modal-box">
-    <button class="close" id="close-email" aria-label="Fermer">×</button>
-    {% if login_url %}
-    <h3>Continuer avec votre compte Creapulse</h3>
-    <p id="email-reason">Votre génération gratuite est utilisée. Un compte Creapulse (gratuit) débloque des générations supplémentaires et le téléchargement du skill.</p>
-    <div class="row">
-      <a class="secondary button" href="{{ login_url }}" target="_top">Se connecter</a>
-      {% if register_url %}<a class="secondary button" href="{{ register_url }}" target="_top">Créer un compte</a>{% endif %}
-    </div>
-    <form id="email-form" hidden>
-    {% else %}
-    <h3>Continuer avec votre email</h3>
-    <p id="email-reason">Votre génération gratuite est utilisée. Entrez votre email : {% if mail_mode == "smtp" %}vous recevez un lien d'accès qui débloque{% else %}il débloque immédiatement{% endif %} des générations supplémentaires et le téléchargement du skill.</p>
-    <form id="email-form">
-    {% endif %}
-      <input type="email" id="email-input" placeholder="vous@votre-domaine.fr" required>
-      <label class="check"><input type="checkbox" id="consent" required> J'accepte que Creapulse conserve mon email pour m'envoyer ce lien d'accès et, éventuellement, me recontacter au sujet de mes contenus. Pas de newsletter, pas de revente. <a href="{{ settings.privacy_url }}" target="_blank" rel="noopener">Confidentialité</a>.</label>
-      <div class="row">
-        <button type="submit" class="secondary">{% if mail_mode == "smtp" %}Recevoir mon lien{% else %}Débloquer l'accès{% endif %}</button>
-      </div>
-      <div id="email-msg" class="flash" hidden></div>
-    </form>
-  </div>
-</div>
 
 <script>
 (function () {
   const MAX_URLS = {{ max_urls }};
   const ROOT = "{{ root }}";
   const EMBED = {{ 'true' if embed else 'false' }};
-  const HOME = ROOT + '/' + (EMBED ? '?embed=1&' : '?');
 
   // Mode embed (iframe dans la landing WordPress) : on transmet la hauteur au parent
   if (EMBED && window.parent !== window) {
@@ -205,7 +171,6 @@
   const progressText = $('#progress-text');
   const submitBtn = $('#submit');
   const result = $('#result');
-  const modal = $('#email-modal');
   let lastData = null;
   let progressTimer = null;
 
@@ -238,25 +203,40 @@
     } else if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
   }
 
-  function openEmail(reason) {
-    if (reason && !{{ 'true' if login_url else 'false' }}) $('#email-reason').textContent = reason;
-    modal.hidden = false; $('#email-input').focus();
+  // Solde du porte-monnaie : affiché à côté du bouton, et le bouton se bloque s'il ne suffit pas
+  const creditsHint = $('#credits-hint');
+  function showRecharge(url) {
+    $('#recharge-row').hidden = !url;
+    if (url) $('#recharge-link').href = url;
   }
-  $('#open-email') && $('#open-email').addEventListener('click', () => openEmail());
-  $('#open-email-embed') && $('#open-email-embed').addEventListener('click', () => openEmail());
-  $('#logout-embed') && $('#logout-embed').addEventListener('click', async () => {
-    await fetch(ROOT + '/auth/logout', { method: 'POST' }); location.href = HOME + 'out=1';
-  });
-  $('#close-email').addEventListener('click', () => { modal.hidden = true; });
-  modal.addEventListener('click', (e) => { if (e.target === modal) modal.hidden = true; });
-
-  $('#logout') && $('#logout').addEventListener('click', async () => {
-    await fetch(ROOT + '/auth/logout', { method: 'POST' }); location.href = HOME + 'out=1';
-  });
+  function renderCredits(balance, cost, canStart, rechargeUrl) {
+    if (balance === null || balance === undefined) return;
+    document.querySelectorAll('.pill.credits').forEach(el => { el.textContent = 'Solde : ' + balance + ' crédits'; el.hidden = false; });
+    if (cost !== null && cost !== undefined) {
+      creditsHint.textContent = 'Une génération : ' + cost + ' crédits';
+      creditsHint.hidden = false;
+    }
+    if (canStart === false) {
+      submitBtn.disabled = true;
+      errorBox.textContent = 'Votre solde ne suffit pas pour une génération.'; errorBox.hidden = false;  // sans défilement au chargement
+      showRecharge(rechargeUrl);
+    }
+  }
+  let creditsCost = null;
+  async function loadCredits() {
+    if (!creditsHint || form.closest('[hidden]')) return;
+    const res = await fetch(ROOT + '/api/credits').catch(() => null);
+    const data = res ? await res.json().catch(() => null) : null;
+    if (!data || !data.ok) return;
+    creditsCost = data.cost;
+    renderCredits(data.balance, data.cost, data.can_start, data.recharge_url);
+  }
+  loadCredits();
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     errorBox.hidden = true;
+    showRecharge(null);
     const urls = Array.from(urlList.querySelectorAll('input')).map(i => i.value.trim()).filter(Boolean);
     if (urls.length < {{ min_urls }}) { showError("Indiquez au moins {{ min_urls }} articles différents : c'est le minimum pour une voix fiable."); return; }
     setBusy(true);
@@ -267,17 +247,16 @@
       });
       const data = await res.json();
       if (!data.ok) {
-        if (data.code === 'need_email' || data.code === 'need_login') { openEmail(data.message); }
-        else if (data.code === 'global_cap' || data.code === 'account_cap' || data.code === 'ip_cap') {
-          showError(data.message + (data.cta_url ? '\nContact : ' + data.cta_url : ''));
-        } else { showError(data.message || 'Erreur.'); }
+        showError(data.message || 'Erreur.');
+        if (data.recharge_url) showRecharge(data.recharge_url);
         return;
       }
       renderResult(data);
+      renderCredits(data.balance, creditsCost, null, null);
       loadHistory();
     } catch (err) {
       showError('Erreur réseau. Réessayez.');
-    } finally { setBusy(false); }
+    } finally { setBusy(false); loadCredits(); }
   });
 
   function renderResult(data) {
@@ -299,7 +278,6 @@
     } else { sugg.hidden = true; }
     $('#out-prompt').textContent = data.prompt_block;
     $('#out-skill').textContent = data.skill_md;
-    $('#download-lock').hidden = data.download_available;
     document.querySelectorAll('.dl').forEach(b => { b.disabled = !data.download_available; });
     result.hidden = false;
     result.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -375,33 +353,18 @@
 
   document.querySelectorAll('.dl').forEach(btn => btn.addEventListener('click', async () => {
     if (!lastData) return;
-    if (!lastData.download_available) { openEmail('Le téléchargement du skill est réservé aux comptes avec email. Entrez votre email pour le débloquer.'); return; }
     const format = btn.dataset.format;
     const res = await fetch(ROOT + '/api/download/skill', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ skill_md: lastData.skill_md, slug: lastData.slug, format })
     });
-    if (!res.ok) { const d = await res.json().catch(() => ({})); if (d.code === 'need_email') openEmail(d.message); return; }
+    if (!res.ok) { const d = await res.json().catch(() => ({})); showError(d.message || 'Téléchargement impossible.'); return; }
     const blob = await res.blob();
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = format === 'zip' ? ('voix-' + lastData.slug + '.zip') : lastData.skill_filename; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }));
 
-  $('#email-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const msg = $('#email-msg'); msg.hidden = true; msg.className = 'flash';
-    const res = await fetch(ROOT + '/api/magic-link', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: $('#email-input').value.trim(), consent: $('#consent').checked })
-    });
-    const data = await res.json();
-    msg.textContent = data.message || (data.ok ? 'Lien envoyé.' : 'Erreur.');
-    if (data.debug_link) { msg.textContent += ' [DEBUG] ' + data.debug_link; }
-    msg.classList.add(data.ok ? 'ok' : 'err');
-    msg.hidden = false;
-    if (data.ok && data.connected) { setTimeout(() => { location.href = HOME + 'connected=1'; }, 1200); }
-  });
 })();
 </script>
 </body>

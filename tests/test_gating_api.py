@@ -6,6 +6,7 @@ from app.config import settings
 from app.distill import Guide
 from app.scraper import PageText, word_count
 from app.store import get_store
+from conftest import login
 
 PROSE = "\n\n".join([("Bon, pour faire simple, voici une phrase de prose qui compte des mots utiles pour la voix éditoriale. " * 5).strip()] * 8)
 GUIDE_MD = "\n\n".join(f"## {s}\n- **trait** : « exemple »" for s in
@@ -33,6 +34,7 @@ def client(monkeypatch):
 
 def test_api_enforces_min_urls(client, monkeypatch):
     monkeypatch.setattr(settings, "min_urls", 3)
+    login(client)
     r = client.post("/api/generate", json={"urls": ["https://example.org/a", "https://example.org/b"]})
     assert r.status_code == 400 and "au moins 3" in r.json()["message"]
     assert get_store().get("global", "all") == 0
@@ -46,110 +48,102 @@ def test_store_counters_are_atomic_and_reversible():
     assert s.increment("global", "all") == 2
     s.decrement("global", "all")
     assert s.get("global", "all") == 1
-    s.upsert_lead("Jane@Example.com", consent=True)
-    s.mark_verified("jane@example.com")
-    lead = s.get_lead("jane@example.com")
-    assert lead["verified_at"] and lead["consent_at"] and lead["generations"] == 0
 
 
-def test_signed_tokens_roundtrip():
-    assert gating.read_anon(gating.sign_anon(2)) == 2
-    assert gating.read_anon("garbage") == 0
-    sess = gating.read_session(gating.sign_session("a@b.fr"))
-    assert sess.email == "a@b.fr" and sess.source == "email" and not sess.is_member
-    assert gating.read_magic_token(gating.make_magic_token("a@b.fr")) == "a@b.fr"
-    assert gating.read_magic_token("nope") is None
+def test_member_session_roundtrip():
+    sess = gating.read_session(gating.sign_session("A@b.fr", 42, (1, 3), "Jane"))
+    assert sess.email == "a@b.fr" and sess.user_id == 42 and sess.levels == (1, 3)
+    assert gating.read_session("garbage") is None
+    # une session sans identifiant de membre ne vaut rien : le porte-monnaie en a besoin
+    forged = gating._serializer("member").dumps({"e": "a@b.fr", "l": []})
+    assert gating.read_session(forged) is None
 
 
-def test_anonymous_gets_one_generation_then_needs_email(client):
+def test_without_an_account_nothing_runs(client, fake_wallet):
+    r = client.post("/api/generate", json={"urls": ["https://example.org/a"]})
+    assert r.status_code == 403 and r.json()["code"] == "need_login"
+    assert client.get("/api/credits").status_code == 403
+    assert client.post("/api/download/skill", json={"skill_md": "---\nname: voix-x", "slug": "x"}).status_code == 403
+    html = client.get("/").text
+    assert "Réservé aux membres" in html and 'id="form-card" hidden' in html
+    assert fake_wallet.calls == [] and get_store().get("global", "all") == 0
+    # plus de capture d'email ni de génération anonyme
+    assert client.post("/api/magic-link", json={"email": "x@y.fr", "consent": True}).status_code in (404, 405)
+    assert "email-form" not in html and "génération gratuite" not in html
+
+
+def test_a_member_generation_debits_then_reports_its_cost(client, fake_wallet):
+    login(client, user_id=7)
     r = client.post("/api/generate", json={"urls": ["https://example.org/article-1"]})
     assert r.status_code == 200, r.text
     data = r.json()
-    assert data["ok"] and data["name"] == "Example" and data["slug"] == "example"
+    assert data["ok"] and data["name"] == "Example" and data["download_available"] is True
     assert data["prompt_block"].startswith("# Voix de marque — Example")
-    assert data["skill_md"].startswith("---\nname: voix-example")
-    assert data["download_available"] is False
-    assert gating.ANON_COOKIE in r.cookies
+    assert data["balance"] == 40
+    [(_, debit)] = [c for c in fake_wallet.calls if c[0] == "debit"]
+    assert debit["user_id"] == 7 and debit["tier"] == "generation"
+    assert debit["usage_ref"].endswith(":1") and len(debit["usage_ref"]) <= 64
+    # le distill factice n'appelle pas le modèle : pas de coût à déclarer
+    assert "cost" not in fake_wallet.routes() and "refund" not in fake_wallet.routes()
 
-    r2 = client.post("/api/generate", json={"urls": ["https://example.org/article-2"]})
-    assert r2.status_code == 403 and r2.json()["code"] == "need_email"
-    # rien n'a été consommé pour la 2e tentative
-    assert get_store().get("global", "all") == 1
-
-
-def test_ip_cap_blocks_cookie_clearing(client):
-    client.post("/api/generate", json={"urls": ["https://example.org/a"]})
-    client.cookies.clear()
-    r = client.post("/api/generate", json={"urls": ["https://example.org/a"]})
-    assert r.status_code == 200  # 2e génération par IP (cap = 2)
-    client.cookies.clear()
-    r = client.post("/api/generate", json={"urls": ["https://example.org/a"]})
-    assert r.status_code == 403 and r.json()["code"] == "need_email"
-
-
-def test_direct_mode_without_smtp_unlocks_immediately(client):
-    assert settings.mail_mode == "direct"
-    r = client.post("/api/magic-link", json={"email": "jane@example.com", "consent": True})
-    assert r.status_code == 200 and r.json()["connected"] is True
-    assert gating.SESSION_COOKIE in r.cookies
-    lead = get_store().get_lead("jane@example.com")
-    assert lead["consent_at"] and lead["verified_at"] is None  # capturé, pas vérifié
-    r = client.post("/api/generate", json={"urls": ["https://example.org/a"]})
-    assert r.status_code == 200 and r.json()["download_available"]
-
-
-def test_magic_link_flow_unlocks_download(client, monkeypatch):
-    from app import main
-    sent = {}
-    monkeypatch.setattr(settings, "smtp_host", "smtp.example.com")
-    monkeypatch.setattr(main, "send_magic_link", lambda to, link: sent.update(to=to, link=link))
-    r = client.post("/api/magic-link", json={"email": "jane@example.com", "consent": True})
-    assert r.status_code == 200, r.text
-    assert r.json()["connected"] is False and sent["to"] == "jane@example.com"
-    assert gating.SESSION_COOKIE not in r.cookies
-    r = client.get(sent["link"].replace(settings.public_base_url, ""), follow_redirects=False)
-    assert r.status_code == 303 and r.headers["location"] == "/?connected=1"
-    assert gating.SESSION_COOKIE in r.cookies
-    assert get_store().get_lead("jane@example.com")["verified_at"]
-
-    r = client.post("/api/generate", json={"urls": ["https://example.org/a", "https://example.org/b"]})
-    data = r.json()
-    assert r.status_code == 200 and data["connected"] and data["download_available"]
-    assert "verbatim" not in data["skill_md"].lower().split("## ton")[0]  # plus d'option extraits
-
-    r = client.post("/api/download/skill", json={"skill_md": data["skill_md"], "slug": data["slug"]})
-    assert r.status_code == 200 and "attachment" in r.headers["content-disposition"]
     r = client.post("/api/download/skill", json={"skill_md": data["skill_md"], "slug": data["slug"], "format": "zip"})
     assert r.status_code == 200 and r.headers["content-type"] == "application/zip"
-    import io, zipfile
-    names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
-    assert names == ["voix-example/SKILL.md"]
-    assert get_store().get_lead("jane@example.com")["generations"] == 1
 
 
-def test_magic_link_requires_consent_and_valid_email(client):
-    assert client.post("/api/magic-link", json={"email": "jane@example.com", "consent": False}).status_code == 400
-    assert client.post("/api/magic-link", json={"email": "not-an-email", "consent": True}).status_code == 400
-
-
-def test_global_cap(client, monkeypatch):
-    monkeypatch.setattr(settings, "global_daily_cap", 1)
+def test_two_generations_use_two_usage_refs(client, fake_wallet):
+    login(client)
     client.post("/api/generate", json={"urls": ["https://example.org/a"]})
-    client.cookies.clear()
+    client.post("/api/generate", json={"urls": ["https://example.org/a"]})
+    refs = [b["usage_ref"] for route, b in fake_wallet.calls if route == "debit"]
+    assert len(refs) == 2 and refs[0] != refs[1] and fake_wallet.balance == 30
+
+
+def test_not_enough_credits_shows_the_recharge_link(client, fake_wallet):
+    fake_wallet.balance = 5
+    login(client)
     r = client.post("/api/generate", json={"urls": ["https://example.org/a"]})
-    assert r.status_code == 429 and r.json()["code"] == "global_cap"
+    assert r.status_code == 402
+    body = r.json()
+    assert body["code"] == "need_credits" and body["recharge_url"].startswith("https://staging.creapulse.fr/")
+    assert "10 crédits" in body["message"] and "5" in body["message"]
+    assert get_store().get("global", "all") == 0  # le plafond du jour n'est pas consommé
 
 
-def test_input_error_releases_slot(client, monkeypatch):
+def test_credits_route_gives_balance_and_price(client, fake_wallet):
+    login(client)
+    data = client.get("/api/credits").json()
+    assert data == {"ok": True, "balance": 50, "cost": 10, "can_start": True,
+                    "recharge_url": "https://staging.creapulse.fr/credits/", "closed_reason": None}
+
+
+def test_rejected_pages_are_not_debited(client, monkeypatch, fake_wallet):
     from app import main
 
     async def short_fetch(urls, client=None):
         return [PageText(u, "", "", 12, False, "texte trop court (12 mots)") for u in urls]
 
     monkeypatch.setattr(main, "fetch_pages", short_fetch)
+    login(client)
     r = client.post("/api/generate", json={"urls": ["https://example.org/a"]})
     assert r.status_code == 422 and "trop court" in r.json()["message"]
-    assert get_store().get("global", "all") == 0
+    assert get_store().get("global", "all") == 0 and fake_wallet.calls == []
+
+
+def test_account_cap(client, monkeypatch):
+    monkeypatch.setattr(settings, "account_daily_cap", 1)
+    login(client)
+    assert client.post("/api/generate", json={"urls": ["https://example.org/a"]}).status_code == 200
+    r = client.post("/api/generate", json={"urls": ["https://example.org/a"]})
+    assert r.status_code == 429 and r.json()["code"] == "account_cap"
+
+
+def test_global_cap(client, monkeypatch):
+    monkeypatch.setattr(settings, "global_daily_cap", 1)
+    login(client, "a@b.fr")
+    client.post("/api/generate", json={"urls": ["https://example.org/a"]})
+    login(client, "c@d.fr", user_id=8)
+    r = client.post("/api/generate", json={"urls": ["https://example.org/a"]})
+    assert r.status_code == 429 and r.json()["code"] == "global_cap"
 
 
 def test_health_and_index(client):
@@ -165,13 +159,11 @@ def test_embed_mode_strips_chrome_and_reports_height(client):
     assert '<body class="">' in client.get("/").text
 
 
-def test_root_path_prefixes_links_and_redirects(client, monkeypatch):
+def test_root_path_prefixes_links(client, monkeypatch):
     monkeypatch.setattr(settings, "root_path", "/outils/voix-de-marque")
     html = client.get("/").text
     assert 'href="/outils/voix-de-marque/static/style.css?v=' in html
     assert 'const ROOT = "/outils/voix-de-marque";' in html
-    r = client.get("/auth/verify?token=bad", follow_redirects=False)
-    assert r.headers["location"] == "/outils/voix-de-marque/?auth=invalid"
     r = client.get("/static/style.css")
     assert r.status_code == 200 and "text/css" in r.headers["content-type"]
     assert client.get("/static/..%2Fmain.py").status_code == 404

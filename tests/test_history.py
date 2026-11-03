@@ -14,6 +14,7 @@ from app.config import settings
 from app.distill import SECTIONS, Guide, canonical_markdown
 from app.scraper import PageText, word_count
 from app.store import get_store
+from conftest import login
 
 PROSE = " ".join(["Une phrase d'article écrite pour de vrai, avec un vrai rythme."] * 60)
 GUIDE = canonical_markdown({s: ("Une voix directe." if s == "Résumé en une phrase" else "- **trait** : « exemple »")
@@ -39,10 +40,6 @@ def api(monkeypatch):
     monkeypatch.setattr(settings, "global_daily_cap", 1000)
     with TestClient(main.app) as c:
         yield c
-
-
-def login(client, email="a@b.fr", levels=()):
-    client.cookies.set(gating.SESSION_COOKIE, gating.sign_session(email, "wordpress" if levels else "email", levels))
 
 
 def test_retention_follows_the_most_generous_level(monkeypatch):
@@ -83,9 +80,9 @@ def test_without_the_box_nothing_is_kept(api):
         assert c.execute("SELECT COUNT(*) FROM profiles").fetchone()[0] == 0
 
 
-def test_an_anonymous_visitor_keeps_nothing(api):
+def test_without_an_account_there_is_no_history(api):
     r = api.post("/api/generate", json=KEEP)
-    assert r.status_code == 200 and r.json()["id"] is None
+    assert r.status_code == 403
     assert api.get("/api/history").status_code == 403
     with get_store()._conn() as c:
         assert c.execute("SELECT COUNT(*) FROM profiles").fetchone()[0] == 0
@@ -94,7 +91,7 @@ def test_an_anonymous_visitor_keeps_nothing(api):
 def test_another_account_cannot_read_or_delete_a_profile(api):
     login(api, "a@b.fr")
     profile_id = api.post("/api/generate", json=KEEP).json()["id"]
-    login(api, "c@d.fr")
+    login(api, "c@d.fr", user_id=8)
     assert api.get("/api/history").json()["profiles"] == []
     assert api.get(f"/api/history/{profile_id}").status_code == 404
     assert api.delete(f"/api/history/{profile_id}").status_code == 404

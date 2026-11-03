@@ -1,7 +1,7 @@
 # Générateur de skill de voix de marque IA
 
-Outil gratuit et autonome (lead-gen) pour creapulse.fr : le visiteur colle 1 à 5 URLs d'articles
-qu'il a écrits → l'outil distille sa **voix de marque** sur 5 axes (ton, style de phrase,
+Outil membre de creapulse.fr, payé en crédits du porte-monnaie commun de creapulse-tools : le membre
+colle 3 à 5 URLs d'articles qu'il a écrits → l'outil distille sa **voix de marque** sur 5 axes (ton, style de phrase,
 vocabulaire, structure, principes édito) → il repart avec un profil **self-contained**, en deux
 formats au choix :
 
@@ -18,11 +18,12 @@ interne de Creapulse.
 ```
 visiteur ──> FastAPI (1 worker, ~80 Mo)
                │  1. garde-fous d'entrée (URLs publiques, ≤ 5, dédoublonnage)
-               │  2. gating (anonyme ×1 → email magic-link ; caps compte / IP / global)
+               │  2. session membre WordPress obligatoire ; caps compte / global
                ├──> crawl4ai (existant) : POST /crawl → markdown "fit" → nettoyage + seuils de mots
+               ├──> porte-monnaie WordPress : debit (rejeté si solde insuffisant), refund si échec, cost
                ├──> omniroute (existant) : POST /chat/completions, T° 0.2 → guide 5 axes (Markdown)
                │  3. enrobage déterministe → prompt universel + SKILL.md (téléchargeable en .md ou .zip importable dans Claude)
-               └──> Postgres minuscule : usage_counters, leads, generation_costs, profiles (historique)
+               └──> store minuscule : usage_counters, leads, generation_costs, profiles, wallet_outbox
 ```
 
 - Aucun contenu scrapé n'est stocké : le texte des pages vit en mémoire le temps de la requête. Le
@@ -44,13 +45,13 @@ visiteur ──> FastAPI (1 worker, ~80 Mo)
 
 | Fichier | Rôle |
 |---|---|
-| `app/main.py` | routes : `/`, `/api/generate`, `/api/magic-link`, `/auth/verify`, `/api/download/skill`, `/health` |
+| `app/main.py` | routes : `/`, `/api/generate`, `/api/credits`, `/api/history…`, `/api/download/skill`, `/health` |
+| `app/wallet.py` | client du porte-monnaie commun (balance, debit, refund, cost) + file de renvoi ; autonome, réutilisable |
 | `app/scraper.py` | appel crawl4ai, nettoyage du Markdown (TOC, partage, cookies, méta), garde-fous qualité |
 | `app/distill.py` | prompt de distillation, appel omniroute, parsing strict des 6 sections (1 relance max) |
 | `app/render.py` | nom/slug depuis le domaine, templates prompt universel + SKILL.md |
-| `app/gating.py` | cookies signés, magic-link (itsdangerous), rate-limit, décision + réservation de slot |
-| `app/store.py` | 2 tables (Postgres ou SQLite), incréments atomiques `ON CONFLICT … RETURNING` |
-| `app/mailer.py` | envoi SMTP du magic-link (ou mode log si `SMTP_HOST` vide) |
+| `app/gating.py` | session membre signée (itsdangerous), rate-limit, plafonds + réservation de slot |
+| `app/store.py` | Postgres ou SQLite, incréments atomiques `ON CONFLICT … RETURNING` |
 | `app/templates/index.html` + `app/static/style.css` | front (vanilla JS, aucune dépendance) |
 | `tests/` | pytest : nettoyage, seuils, parsing, templates, gating de bout en bout (scraper/LLM mockés) |
 
@@ -63,7 +64,7 @@ cp .env.example .env   # renseigner SECRET_KEY, CRAWL4AI_TOKEN, LLM_API_KEY ; la
 set -a; . ./.env; set +a; .venv/Scripts/python.exe -m uvicorn app.main:app --reload
 ```
 
-En local, `COOKIE_SECURE=false` et `DEBUG=true` : le magic-link s'affiche dans la réponse (mode log).
+En local, `COOKIE_SECURE=false` et `DEBUG=true`. Sans session membre, l'outil affiche « Réservé aux membres ».
 
 ## Déployer sur Coolify
 
@@ -81,10 +82,8 @@ port 8000, healthcheck `/health` (l'image embarque `curl`). Repo privé lu via u
 3. **Variables** : voir `.env.example`. Secrets à saisir à la main dans Coolify : `CRAWL4AI_TOKEN`
    (= `CRAWL4AI_API_TOKEN` de l'app crawl4ai) et `LLM_API_KEY` (clé créée dans le dashboard omniroute,
    dédiée à cet outil pour suivre son coût). `SECRET_KEY` est générée au déploiement initial.
-4. **Email** : sans `SMTP_HOST`, mode **direct** — l'email est capturé (lead, consentement horodaté) et
-   l'accès débloqué tout de suite, sans lien de vérification. Avec `SMTP_*` renseignés (les mêmes
-   identifiants que WP Mail SMTP conviennent), mode **magic-link** : un lien de connexion est envoyé,
-   l'email est vérifié (`verified_at`). Le choix se fait uniquement par la présence des variables.
+4. **Porte-monnaie** : `CREAPULSE_CREDITS_SECRET_VOIX` (posée par Serge, jamais lue ni affichée ailleurs) et
+   `WP_BASE_URL` (staging pour la recette, www en prod). Voir « Porte-monnaie de crédits » ci-dessous.
 5. Appels internes possibles via le réseau Docker `coolify` (`CRAWL4AI_URL=http://<container>:11235`,
    `LLM_BASE_URL=http://<container>:20128/api/v1`) pour éviter l'aller-retour public.
 
@@ -95,18 +94,17 @@ dans l'app ne dépend de Coolify.
 
 ## Identité WordPress (membres Paid Memberships Pro)
 
-Depuis le 2026-09-09, la landing embarque l'outil via le shortcode du plugin creapulse-tools
-(`[creapulse_tool src="…/?embed=1" access="optional" register_level="1"]`). Le plugin ajoute au `src` soit un
+La landing embarque l'outil via le shortcode du plugin creapulse-tools. Le plugin ajoute au `src` soit un
 **jeton signé** (`wp_token`, HMAC-SHA256, 10 min) pour un visiteur connecté, soit `login_url` / `register_url`
-pour un anonyme. Côté app (`app/wp_token.py`, `app/main.py`) :
+pour un visiteur sans session. Le compte est **obligatoire** depuis le porte-monnaie de crédits (079) : plus
+de génération anonyme ni de capture d'email. Côté app (`app/wp_token.py`, `app/main.py`) :
 
-- jeton valide → session **membre** (cookie signé, `source=wordpress`, niveaux PMPro, TTL `MEMBER_SESSION_TTL_S`
-  = 8 h), lead marqué `verified` avec `source=wordpress`, puis **302 vers la même URL sans le jeton**
-  (`Referrer-Policy: no-referrer`, `Cache-Control: no-store`) ; jeton invalide → ignoré, comportement anonyme ;
-- anonyme → boutons « Se connecter / Créer un compte » (cible `_top`, URLs acceptées seulement sous
-  `WP_SITE_PREFIX`) à la place de la capture d'email, qui reste le repli hors WordPress ;
-- `AUTH_MODE` : `open` (public), `optional` (défaut : gratuit limité pour anonymes, complet pour membres),
-  `required` (tout derrière la connexion, `REQUIRED_LEVELS="2,3"` optionnel ; l'API refuse aussi les accès directs).
+- jeton valide → session **membre** (cookie signé avec l'email, le `sub` du jeton, qui sert d'`user_id` au
+  porte-monnaie, et les niveaux PMPro ; TTL `MEMBER_SESSION_TTL_S`), lead marqué `verified`, puis **302 vers
+  la même URL sans le jeton** (`Referrer-Policy: no-referrer`, `Cache-Control: no-store`) ; jeton invalide → ignoré ;
+- sans session → « Réservé aux membres » et boutons « Se connecter / Créer un compte » (cible `_top`, URLs
+  acceptées seulement sous `WP_SITE_PREFIX`) ; l'API refuse aussi les accès directs (403 `need_login`) ;
+- `REQUIRED_LEVELS="2,3"` (optionnel) réserve l'outil à certains niveaux PMPro.
 
 Le secret `WP_TOKEN_SECRET` = `CREAPULSE_TOOLS_TOKEN_SECRET` côté WordPress. Vecteur de référence pinné dans
 `tests/test_wp_token.py`. L'auto-hauteur de l'iframe reste assurée par un petit bloc HTML après le shortcode
@@ -118,10 +116,11 @@ Le secret `WP_TOKEN_SECRET` = `CREAPULSE_TOOLS_TOKEN_SECRET` côté WordPress. V
 |---|---|---|
 | `MIN_WORDS_PER_PAGE` / `MIN_WORDS_TOTAL` | 300 / 600 | refus propre si extraction vide ou courte |
 | `MAX_WORDS_PER_PAGE` / `MAX_WORDS_TOTAL` | 2500 / 9000 | budget tokens (tronque équitablement) |
-| `ANON_FREE_GENERATIONS` | 1 | générations sans email (cookie signé) |
-| `ANON_IP_DAILY_CAP` | 2 | filet si le cookie est effacé |
-| `ACCOUNT_DAILY_CAP` | 3 | par email vérifié |
-| `GLOBAL_DAILY_CAP` | 40 | tous visiteurs — protège le budget en dur |
+| `ACCOUNT_DAILY_CAP` | 3 | générations par membre et par jour, en plus des crédits |
+| `GLOBAL_DAILY_CAP` | 40 | tous membres : protège le budget LLM en dur |
+| `WP_BASE_URL` | `https://www.creapulse.fr` | site du porte-monnaie et de `tool-event` (staging pour la recette) |
+| `CREAPULSE_CREDITS_SECRET_VOIX` | (vide) | secret partagé avec WordPress, 32 caractères au moins ; sans lui, l'outil refuse de lancer |
+| `CREDITS_TOOL_SLUG` / `CREDITS_TIER` | `voix` / `generation` | outil et palier débités ; le **prix** se règle dans wp-admin → Crédits |
 | `LLM_MODEL` / `LLM_TEMPERATURE` | `openai/gpt-5.4-mini` / 0.2 | choix du modèle dans omniroute ; T° basse = mêmes URLs → même profil |
 | `MAX_GUIDE_CHARS` | 5000 | plafond du guide 5 axes, garanti par le code (voir ci-dessous) |
 | `FREE_RETENTION_MONTHS` | 3 | conservation d'un profil dans l'historique, sans niveau PMPro |
@@ -151,6 +150,23 @@ Mesuré sur un guide réel de 5 987 caractères : le filet seul ramène à 4 970
 dans « Structure / format » et « Principes édito ». Ton, style de phrase et vocabulaire sortent intacts,
 puisque ce sont eux qui transmettent la voix.
 
+## Porte-monnaie de crédits
+
+Contrat creapulse-tools 079 (`app/wallet.py`) : `POST <WP_BASE_URL>/wp-json/creapulse-tools/v1/credits/{balance,
+debit,refund,cost}`, en-têtes `X-Creapulse-Tool: voix` et `X-Credits-Secret`. Une génération :
+
+1. lit et vérifie les pages (gratuit : une entrée refusée ne débite rien) ;
+2. **débite** le palier `generation` avec un `usage_ref` neuf (`voix<16 hex>:1`). Délai dépassé ou 503 : le même
+   `usage_ref` est rejoué une fois, puis un `refund` part et rien ne se lance. 402 → message et lien de recharge ;
+   403 fermé (`free_budget`, `tool_disabled`), 404/410 compte inconnu : rien ne se lance ;
+3. distille ; si ça échoue, **rembourse** (`refund`, raison `distill_failed` ou `error`) ;
+4. **déclare le coût réel** (`cost`, le `CostMeter.contract()`), réussite ou échec, après la réponse.
+
+`refund` et `cost` passent par une file (`wallet_outbox`) sur 503 ou erreur réseau seulement, rejouée au
+démarrage et avant chaque déclaration de coût ; tout autre refus est loggé et abandonné. `GET /api/credits`
+donne au front le solde, le prix du palier et le lien de recharge. Les crédits de bienvenue (une fois par
+compte) remplacent l'ancienne génération anonyme gratuite.
+
 ## Suivi coût / usage
 
 Chaque génération qui a appelé le modèle, réussie ou non, enregistre son coût dans la table
@@ -173,10 +189,10 @@ omniroute garde le total par clé (clé dédiée à cet outil).
 
 ## RGPD
 
-- Consentement explicite (case à cocher) avant capture de l'email ; lien vers la politique de confidentialité.
-- Table `leads` : email, dates (création, consentement, vérification, dernière visite), nombre de générations.
+- Plus de capture d'email propre à l'outil : l'identité vient du compte WordPress (jeton signé).
+- Table `leads` : email du membre, dates, nombre de générations (les lignes de l'ancienne capture restent).
   Rien d'autre. Les IP ne sont stockées que hachées (HMAC + `SECRET_KEY`), dans des compteurs purgés après 7 jours.
 - Le contenu scrapé n'est jamais persisté.
 - Table `profiles` : pour un compte identifié qui a coché « Garder ce profil » (opt-in, décochée par défaut), ses profils (guide, résumé, URL et titre des pages lues),
   effacés au bout de la durée de conservation ; suppression à la demande depuis « Mes profils ».
-  Rien pour un visiteur anonyme. La politique de confidentialité du site doit mentionner cet historique.
+  La politique de confidentialité du site doit mentionner cet historique.
