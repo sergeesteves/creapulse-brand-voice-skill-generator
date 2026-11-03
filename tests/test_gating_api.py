@@ -113,7 +113,29 @@ def test_credits_route_gives_balance_and_price(client, fake_wallet):
     login(client)
     data = client.get("/api/credits").json()
     assert data == {"ok": True, "balance": 50, "cost": 10, "can_start": True,
-                    "recharge_url": "https://staging.creapulse.fr/credits/", "closed_reason": None}
+                    "recharge_url": "https://staging.creapulse.fr/credits/", "closed_reason": None, "message": None}
+
+
+def test_a_refused_welcome_says_so_instead_of_a_bare_zero(client, fake_wallet, monkeypatch):
+    """Adresse jetable ou plafond mensuel des bienvenues : solde à 0 et `welcome_closed`."""
+    from app.wallet import WalletError
+    fake_wallet.balance = 0
+    real = fake_wallet.call
+
+    async def with_reason(c, route, body):
+        out = await real(c, route, body)
+        return {**out, "closed_reason": "welcome_closed"} if route == "balance" else out
+
+    monkeypatch.setattr("app.wallet.call", with_reason)
+    login(client)
+    data = client.get("/api/credits").json()
+    assert data["can_start"] is False and "bienvenue" in data["message"]
+
+    fake_wallet.fail("debit", WalletError(402, "credits_insufficient",
+                                          {"balance": 0, "required": 10, "closed_reason": "welcome_closed",
+                                           "recharge_url": "https://staging.creapulse.fr/credits/"}))
+    r = client.post("/api/generate", json={"urls": ["https://example.org/a"]})
+    assert r.status_code == 402 and "bienvenue" in r.json()["message"] and r.json()["recharge_url"]
 
 
 def test_rejected_pages_are_not_debited(client, monkeypatch, fake_wallet):

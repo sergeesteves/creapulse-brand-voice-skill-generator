@@ -209,7 +209,7 @@
     $('#recharge-row').hidden = !url;
     if (url) $('#recharge-link').href = url;
   }
-  function renderCredits(balance, cost, canStart, rechargeUrl) {
+  function renderCredits(balance, cost, canStart, rechargeUrl, message) {
     if (balance === null || balance === undefined) return;
     document.querySelectorAll('.pill.credits').forEach(el => { el.textContent = 'Solde : ' + balance + ' crédits'; el.hidden = false; });
     if (cost !== null && cost !== undefined) {
@@ -218,7 +218,7 @@
     }
     if (canStart === false) {
       submitBtn.disabled = true;
-      errorBox.textContent = 'Votre solde ne suffit pas pour une génération.'; errorBox.hidden = false;  // sans défilement au chargement
+      errorBox.textContent = message || 'Votre solde ne suffit pas pour une génération.'; errorBox.hidden = false;  // sans défilement au chargement
       showRecharge(rechargeUrl);
     }
   }
@@ -229,7 +229,7 @@
     const data = res ? await res.json().catch(() => null) : null;
     if (!data || !data.ok) return;
     creditsCost = data.cost;
-    renderCredits(data.balance, data.cost, data.can_start, data.recharge_url);
+    renderCredits(data.balance, data.cost, data.can_start, data.recharge_url, data.message);
   }
   loadCredits();
 

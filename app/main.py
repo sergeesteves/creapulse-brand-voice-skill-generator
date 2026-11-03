@@ -211,13 +211,20 @@ def _usage_ref() -> str:
     return f"voix{secrets.token_hex(8)}:1"
 
 
+# Solde à 0 sans bienvenue : adresse jetable, ou plafond mensuel des bienvenues atteint
+WELCOME_CLOSED = ("Les crédits de bienvenue ne sont pas disponibles pour ce compte en ce moment. "
+                  "Vous pouvez recharger vos crédits pour lancer une génération.")
+
+
 def _wallet_refusal(exc: wallet.WalletError) -> JSONResponse:
     """Traduit un refus du porte-monnaie pour le membre. Rien n'a été lancé."""
     if exc.status == 402:
         required, left = exc.data.get("required"), exc.data.get("balance")
-        return _error(402, "need_credits",
-                      f"Une génération demande {required} crédits, il vous en reste {left}.",
-                      balance=left, required=required, recharge_url=exc.data.get("recharge_url"))
+        msg = f"Une génération demande {required} crédits, il vous en reste {left}."
+        if exc.data.get("closed_reason") == "welcome_closed":
+            msg = WELCOME_CLOSED
+        return _error(402, "need_credits", msg, balance=left, required=required,
+                      recharge_url=exc.data.get("recharge_url"))
     if exc.status == 403:
         reason = exc.data.get("closed_reason")
         msg = ("Les essais gratuits sont en pause jusqu'au mois prochain. Les crédits achetés restent utilisables."
@@ -257,9 +264,14 @@ async def api_credits(request: Request):
         log.warning("solde illisible : %s", exc)
         return _error(503, "wallet", "Solde indisponible pour le moment.")
     tier = settings.credits_tier
+    can_start = bool((data.get("can_start") or {}).get(tier))
+    message = None
+    if not can_start:
+        message = (WELCOME_CLOSED if data.get("closed_reason") == "welcome_closed"
+                   else "Votre solde ne suffit pas pour une génération.")
     return {"ok": True, "balance": data.get("balance"), "cost": (data.get("costs") or {}).get(tier),
-            "can_start": bool((data.get("can_start") or {}).get(tier)), "recharge_url": data.get("recharge_url"),
-            "closed_reason": data.get("closed_reason")}
+            "can_start": can_start, "recharge_url": data.get("recharge_url"),
+            "closed_reason": data.get("closed_reason"), "message": message}
 
 
 @app.post("/api/generate")
