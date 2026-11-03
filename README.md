@@ -27,7 +27,8 @@ visiteur ──> FastAPI (1 worker, ~80 Mo)
 
 - Aucun contenu scrapé n'est stocké : le texte des pages vit en mémoire le temps de la requête. Le
   téléchargement du skill est stateless (le navigateur renvoie le contenu généré).
-- **Historique « Mes profils »** (comptes identifiés seulement) : table `profiles` avec le guide, le
+- **Historique « Mes profils »**, en **opt-in** : un profil n'est gardé que si un compte identifié coche
+  « Garder ce profil » (`"save": true` dans `/api/generate`) ; sinon rien n'est écrit. Table `profiles` avec le guide, le
   résumé, le nom, et l'URL et le titre des pages lues. Bloc prompt et SKILL.md se recalculent à la
   lecture. Conservation selon le niveau PMPro, mêmes noms et même logique que l'outil de clustering
   (`FREE_RETENTION_MONTHS`, `LEVEL_RETENTION_MONTHS`) : au-delà, guide et résumé sont effacés et la ligne
@@ -176,6 +177,6 @@ omniroute garde le total par clé (clé dédiée à cet outil).
 - Table `leads` : email, dates (création, consentement, vérification, dernière visite), nombre de générations.
   Rien d'autre. Les IP ne sont stockées que hachées (HMAC + `SECRET_KEY`), dans des compteurs purgés après 7 jours.
 - Le contenu scrapé n'est jamais persisté.
-- Table `profiles` : pour un compte identifié, ses profils (guide, résumé, URL et titre des pages lues),
+- Table `profiles` : pour un compte identifié qui a coché « Garder ce profil » (opt-in, décochée par défaut), ses profils (guide, résumé, URL et titre des pages lues),
   effacés au bout de la durée de conservation ; suppression à la demande depuis « Mes profils ».
   Rien pour un visiteur anonyme. La politique de confidentialité du site doit mentionner cet historique.

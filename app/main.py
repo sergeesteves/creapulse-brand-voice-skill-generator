@@ -192,6 +192,7 @@ async def index(request: Request):
             "max_urls": settings.max_urls,
             "min_urls": settings.min_urls,
             "min_words": settings.min_words_per_page,
+            "retention_months": settings.retention_months(sess.levels if sess else ()),
         },
     )
     resp.headers["Referrer-Policy"] = "no-referrer"
@@ -280,7 +281,9 @@ async def api_generate(request: Request, payload: dict = Body(...)):
     profile_id = None
     if email:
         store.bump_lead_generations(email)
-        profile_id = _save_profile(store, sess, name, slug, page_views, guide)
+        # Opt-in explicite : sans la case cochée, le profil n'est gardé nulle part
+        if payload.get("save") is True:
+            profile_id = _save_profile(store, sess, name, slug, page_views, guide)
     _record_cost(store, "ok", good, guide.model, meter)
     log.info("generation ok ip=%s email=%s pages=%d words=%d guide=%dc model=%s usage=%s cost=%.5f$ (%s, %d appel(s))",
              gating.ip_key(ip)[:8], "yes" if email else "no", len(good), sum(p.words for p in good),

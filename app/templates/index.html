@@ -31,7 +31,7 @@
     <p class="kicker">Outil gratuit</p>
     <h1>Générateur de skill de voix de marque IA</h1>
     <p class="lead">Vous avez déjà une voix. Elle est dans vos articles. Collez {{ min_urls }} à {{ max_urls }} URLs de textes que <strong>vous</strong> avez écrits : l'outil en distille les règles (ton, phrases, vocabulaire, structure, positionnement) et vous rend un profil prêt à coller dans ChatGPT ou Claude — en bloc prompt, ou en skill.</p>
-    <p class="note">Pas de compte pour la première génération. Le contenu de vos pages n'est pas conservé : il est lu, distillé, puis oublié.</p>
+    <p class="note">Pas de compte pour la première génération. Le contenu de vos pages n'est pas conservé : il est lu, distillé, puis oublié. Le profil non plus, sauf si vous choisissez de le garder dans votre compte.</p>
   </section>
 
   {% if embed %}
@@ -69,6 +69,9 @@
         <button type="button" class="ghost" id="add-url">+ Ajouter une URL (max {{ max_urls }})</button>
       </div>
       <p class="hint small">Le profil ne contient que des règles explicites, ancrées sur vos textes : c'est ce qui se transfère le mieux à un nouveau sujet. Pour plus de fidélité, ajoutez vous-même votre meilleur article en exemple dans votre conversation.</p>
+      {% if email %}
+      <label class="check"><input type="checkbox" id="save-profile"> Garder ce profil dans « Mes profils » pour le retrouver plus tard ({% if retention_months %}conservé {{ retention_months }} mois{% else %}sans limite de durée{% endif %}, supprimable à tout moment). Sans cette case, il n'est conservé nulle part.</label>
+      {% endif %}
       <div class="row">
         <button type="submit" class="primary" id="submit">Distiller ma voix</button>
         <span id="progress" class="progress" hidden><span class="spinner"></span> <span id="progress-text">Lecture des pages…</span></span>
@@ -143,7 +146,7 @@
     <details><summary>Que fait exactement l'outil ?</summary><p>Il lit le texte principal de vos pages, puis un modèle de langage en distille les règles de votre voix sur 5 axes : ton, style de phrase, vocabulaire (mots-signature et mots à éviter), structure, principes éditoriaux. Chaque trait est ancré sur des tournures réellement présentes dans vos textes. Rien n'est inventé.</p></details>
     <details><summary>Pourquoi mes URLs sont refusées ?</summary><p>Parce que l'extraction est vide ou trop courte : page d'accueil, catégorie, page vitrine, paywall, ou site qui bloque les robots. Une mauvaise extraction donnerait un profil bidon, on préfère refuser proprement. Prenez des articles complets, de {{ min_words }} mots minimum.</p></details>
     <details><summary>Le résultat est-il stable ?</summary><p>Oui, la distillation tourne à température basse : mêmes URLs, même profil (à quelques mots près).</p></details>
-    <details><summary>Que stockez-vous ?</summary><p>Rien du contenu de vos pages. Sans compte, rien du profil généré non plus : seulement des compteurs d'usage anonymes. Avec un compte, vos profils sont gardés dans « Mes profils », avec l'adresse et le titre des articles lus, pour que vous les retrouviez ; ils sont effacés au bout de la durée de conservation indiquée, et vous pouvez les supprimer vous-même à tout moment. Votre email sert au lien d'accès et à un éventuel contact. Voir la <a href="{{ settings.privacy_url }}" target="_blank" rel="noopener">politique de confidentialité</a>.</p></details>
+    <details><summary>Que stockez-vous ?</summary><p>Rien du contenu de vos pages, et rien du profil généré par défaut : seulement des compteurs d'usage anonymes. Si vous êtes connecté et cochez « Garder ce profil », ce profil-là est rangé dans « Mes profils », avec l'adresse et le titre des articles lus ; il est effacé au bout de la durée de conservation indiquée, et vous pouvez le supprimer vous-même à tout moment. Sans la case, rien n'est gardé. Votre email sert au lien d'accès et à un éventuel contact. Voir la <a href="{{ settings.privacy_url }}" target="_blank" rel="noopener">politique de confidentialité</a>.</p></details>
     <details><summary>Skill ou bloc prompt ?</summary><p>Le bloc prompt marche partout, c'est le défaut. Le skill est le même contenu, emballé pour Claude Code et les runtimes qui chargent des skills automatiquement. Tout est dedans dans les deux cas, aucun fichier externe.</p></details>
   </section>
 </main>
@@ -260,7 +263,7 @@
     try {
       const res = await fetch(ROOT + '/api/generate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ urls })
+        body: JSON.stringify({ urls, save: !!($('#save-profile') && $('#save-profile').checked) })
       });
       const data = await res.json();
       if (!data.ok) {

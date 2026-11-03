@@ -1,6 +1,7 @@
 """Historique des profils d'un compte identifié : retrouver, supprimer, et une base qui ne grossit pas.
 
-Le compte sans identité ne garde rien. La conservation suit le niveau PMPro, comme le clustering ;
+Opt-in : un profil n'est gardé que si la case « Garder ce profil » est cochée. Le visiteur anonyme ne
+garde rien, case cochée ou non. La conservation suit le niveau PMPro, comme le clustering ;
 au-delà, le contenu est effacé et la ligne reste pour dire « expiré ».
 """
 import datetime as dt
@@ -18,6 +19,7 @@ PROSE = " ".join(["Une phrase d'article écrite pour de vrai, avec un vrai rythm
 GUIDE = canonical_markdown({s: ("Une voix directe." if s == "Résumé en une phrase" else "- **trait** : « exemple »")
                             for s in SECTIONS})
 URLS = ["https://ex.fr/a", "https://ex.fr/b", "https://ex.fr/c"]
+KEEP = {"urls": URLS, "save": True}  # case « Garder ce profil » cochée
 
 
 @pytest.fixture
@@ -56,7 +58,7 @@ def test_retention_follows_the_most_generous_level(monkeypatch):
 
 def test_an_identified_account_finds_its_profile_again(api):
     login(api)
-    r = api.post("/api/generate", json={"urls": URLS})
+    r = api.post("/api/generate", json=KEEP)
     assert r.status_code == 200
     generated = r.json()
     assert generated["id"]
@@ -71,8 +73,18 @@ def test_an_identified_account_finds_its_profile_again(api):
     assert again["download_available"] is True
 
 
+def test_without_the_box_nothing_is_kept(api):
+    login(api)
+    for payload in ({"urls": URLS}, {"urls": URLS, "save": False}, {"urls": URLS, "save": "true"}):
+        r = api.post("/api/generate", json=payload)
+        assert r.status_code == 200 and r.json()["id"] is None and r.json()["guide"] == GUIDE
+    assert api.get("/api/history").json()["profiles"] == []
+    with get_store()._conn() as c:
+        assert c.execute("SELECT COUNT(*) FROM profiles").fetchone()[0] == 0
+
+
 def test_an_anonymous_visitor_keeps_nothing(api):
-    r = api.post("/api/generate", json={"urls": URLS})
+    r = api.post("/api/generate", json=KEEP)
     assert r.status_code == 200 and r.json()["id"] is None
     assert api.get("/api/history").status_code == 403
     with get_store()._conn() as c:
@@ -81,7 +93,7 @@ def test_an_anonymous_visitor_keeps_nothing(api):
 
 def test_another_account_cannot_read_or_delete_a_profile(api):
     login(api, "a@b.fr")
-    profile_id = api.post("/api/generate", json={"urls": URLS}).json()["id"]
+    profile_id = api.post("/api/generate", json=KEEP).json()["id"]
     login(api, "c@d.fr")
     assert api.get("/api/history").json()["profiles"] == []
     assert api.get(f"/api/history/{profile_id}").status_code == 404
@@ -92,7 +104,7 @@ def test_another_account_cannot_read_or_delete_a_profile(api):
 
 def test_delete_removes_the_profile(api):
     login(api)
-    profile_id = api.post("/api/generate", json={"urls": URLS}).json()["id"]
+    profile_id = api.post("/api/generate", json=KEEP).json()["id"]
     assert api.delete(f"/api/history/{profile_id}").json() == {"ok": True}
     assert api.get("/api/history").json()["profiles"] == []
     assert api.get(f"/api/history/{profile_id}").status_code == 404
@@ -101,14 +113,14 @@ def test_delete_removes_the_profile(api):
 def test_the_account_keeps_only_its_most_recent_profiles(api, monkeypatch):
     monkeypatch.setattr(settings, "history_max_per_account", 3)
     login(api)
-    ids = [api.post("/api/generate", json={"urls": URLS}).json()["id"] for _ in range(5)]
+    ids = [api.post("/api/generate", json=KEEP).json()["id"] for _ in range(5)]
     listed = [p["id"] for p in api.get("/api/history").json()["profiles"]]
     assert listed == ids[:-4:-1]  # les 3 derniers, du plus récent au plus ancien
 
 
 def test_an_expired_profile_loses_its_content_but_stays_listed(api):
     login(api)
-    profile_id = api.post("/api/generate", json={"urls": URLS}).json()["id"]
+    profile_id = api.post("/api/generate", json=KEEP).json()["id"]
     store = get_store()
     assert store.purge_expired_profiles(dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=80)) == 0
     assert store.purge_expired_profiles(dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=92)) == 1
@@ -124,7 +136,7 @@ def test_an_expired_profile_loses_its_content_but_stays_listed(api):
 def test_unlimited_retention_is_never_purged(api, monkeypatch):
     monkeypatch.setattr(settings, "level_retention_months", "8:0")
     login(api, levels=(8,))
-    api.post("/api/generate", json={"urls": URLS})
+    api.post("/api/generate", json=KEEP)
     assert get_store().purge_expired_profiles(dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=3650)) == 0
 
 
@@ -134,5 +146,5 @@ def test_a_history_failure_never_costs_the_visitor_its_profile(api, monkeypatch)
 
     monkeypatch.setattr(get_store(), "save_profile", broken)
     login(api)
-    r = api.post("/api/generate", json={"urls": URLS})
+    r = api.post("/api/generate", json=KEEP)
     assert r.status_code == 200 and r.json()["id"] is None and r.json()["guide"] == GUIDE

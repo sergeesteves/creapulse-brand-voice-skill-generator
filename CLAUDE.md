@@ -29,8 +29,9 @@ Détails d'archi, fichiers, variables et déploiement : [README.md](./README.md)
   calquer le sujet plutôt que la mécanique). Les règles explicites seules. Le verbatim reste l'argument du
   « système complet » (upsell).
 - **Rien du contenu scrapé n'est stocké.** Le store contient compteurs, leads, coûts par génération et,
-  pour un compte identifié seulement, l'historique de ses profils (guide + URL/titre des pages), purgé
-  selon la durée de conservation. Jamais le texte des pages.
+  pour un compte identifié qui l'a demandé (case « Garder ce profil », décochée par défaut), l'historique
+  de ses profils (guide + URL/titre des pages), purgé selon la durée de conservation. Jamais le texte
+  des pages. L'opt-in est un argument de confidentialité : ne jamais le transformer en défaut.
 - Secrets uniquement en variables d'env Coolify. Ne jamais committer `.env`.
 - Repo sur Google Drive : avant toute opération git, `find .git -name desktop.ini -delete`.
 
