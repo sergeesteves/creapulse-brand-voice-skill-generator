@@ -66,6 +66,12 @@ set -a; . ./.env; set +a; .venv/Scripts/python.exe -m uvicorn app.main:app --rel
 
 En local, `COOKIE_SECURE=false` et `DEBUG=true`. Sans session membre, l'outil affiche « Réservé aux membres ».
 
+Recette du porte-monnaie contre le staging : `WP_BASE_URL=https://staging.creapulse.fr`, `ROOT_PATH=` vide,
+`WP_TOOL_EVENT_URL=off`, puis `uvicorn … --env-file .env` et, dans un second terminal,
+`scripts/session-locale.py --user-id <id staging> --email <email>`, qui ouvre le navigateur avec une session
+membre (le shortcode ne peut pas ouvrir de session dans un iframe localhost). `WP_TOKEN_SECRET` est alors
+une valeur locale quelconque ; `CREAPULSE_CREDITS_SECRET_VOIX` doit être celle du staging.
+
 ## Déployer sur Coolify
 
 État au 2026-09-07 : app **`brand-voice-skill-generator`** dans le projet « Mes outils », build pack Dockerfile,
