@@ -1,7 +1,8 @@
-"""Store minuscule pour le gating : 2 tables (usage_counters, leads).
+"""Store minuscule : 3 tables (usage_counters, leads, generation_costs).
 
 Postgres en prod (DATABASE_URL=postgresql://…), SQLite en dev/tests (défaut).
-Aucun contenu scrapé ni profil généré n'est stocké — uniquement des compteurs et des emails.
+Aucun contenu scrapé ni profil généré n'est stocké — uniquement des compteurs, des emails et le coût
+de chaque génération (ni adresse, ni URL, ni texte).
 """
 from __future__ import annotations
 
@@ -30,7 +31,27 @@ SCHEMA = [
         generations INTEGER NOT NULL DEFAULT 0,
         source      TEXT
     )""",
+    # Une ligne par génération qui a appelé le modèle, réussie ou non : les échecs coûtent aussi.
+    """CREATE TABLE IF NOT EXISTS generation_costs (
+        created_at        TEXT NOT NULL,
+        status            TEXT NOT NULL,
+        pages             INTEGER NOT NULL DEFAULT 0,
+        words             INTEGER NOT NULL DEFAULT 0,
+        model             TEXT,
+        llm_calls         INTEGER NOT NULL DEFAULT 0,
+        prompt_tokens     INTEGER NOT NULL DEFAULT 0,
+        completion_tokens INTEGER NOT NULL DEFAULT 0,
+        cost_llm_usd      REAL NOT NULL DEFAULT 0,
+        cost_data_usd     REAL NOT NULL DEFAULT 0,
+        cost_other_usd    REAL NOT NULL DEFAULT 0,
+        cost_complete     INTEGER NOT NULL DEFAULT 0,
+        cost_llm_source   TEXT
+    )""",
 ]
+
+COST_COLUMNS = ["created_at", "status", "pages", "words", "model", "llm_calls", "prompt_tokens",
+                "completion_tokens", "cost_llm_usd", "cost_data_usd", "cost_other_usd", "cost_complete",
+                "cost_llm_source"]
 # Migrations additives (colonnes ajoutées après coup) — idempotentes, l'erreur "existe déjà" est ignorée
 MIGRATIONS = [
     "ALTER TABLE leads ADD COLUMN source TEXT",
@@ -159,6 +180,24 @@ class Store:
             return None
         keys = ["email", "created_at", "consent_at", "verified_at", "last_seen", "generations", "source"]
         return dict(zip(keys, row))
+
+    # --- coût par génération ----------------------------------------------
+    def record_generation_cost(self, *, status: str, pages: int, words: int, model: str | None,
+                               meter) -> None:
+        contract = meter.contract()
+        values = (now_iso(), status, pages, words, model, meter.llm_calls, meter.prompt_tokens,
+                  meter.completion_tokens, contract["cost_llm_usd"], contract["cost_data_usd"],
+                  contract["cost_other_usd"], int(contract["cost_complete"]), meter.llm_source)
+        sql = self._q(f"INSERT INTO generation_costs ({', '.join(COST_COLUMNS)}) "
+                      f"VALUES ({', '.join(['%s'] * len(COST_COLUMNS))})")
+        with self._conn() as c:
+            c.execute(sql, values)
+
+    def recent_generation_costs(self, limit: int = 100) -> list[dict]:
+        sql = self._q(f"SELECT {', '.join(COST_COLUMNS)} FROM generation_costs ORDER BY created_at DESC LIMIT %s")
+        with self._conn() as c:
+            rows = c.execute(sql, (limit,)).fetchall()
+        return [dict(zip(COST_COLUMNS, row)) for row in rows]
 
 
 _store: Store | None = None

@@ -81,6 +81,10 @@ class Settings:
     llm_temperature: float = _float("LLM_TEMPERATURE", 0.2)
     llm_timeout_s: float = _float("LLM_TIMEOUT_S", 120.0)
     llm_max_output_tokens: int = _int("LLM_MAX_OUTPUT_TOKENS", 2500)
+    # Prix du modèle en $ par million de jetons (catalogue OpenRouter relevé le 2026-11-03). Ne sert
+    # qu'à estimer le coût d'un appel quand le routeur ne l'annonce pas dans sa réponse.
+    llm_price_in_per_m: float = _float("LLM_PRICE_IN_PER_M", 0.75)
+    llm_price_out_per_m: float = _float("LLM_PRICE_OUT_PER_M", 4.50)
     # Plafond du guide 5 axes. Un profil trop long noie le modèle qui l'applique (constat mesuré
     # le 2026-10-02 sur le guide Creapulse : 10 100 car. = 70 % des consignes du rédacteur).
     # 5 500 depuis le 2026-10-15 : le guide porte désormais la fréquence de chaque trait et des
