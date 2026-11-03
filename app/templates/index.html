@@ -77,6 +77,15 @@
     <div id="error" class="flash err" hidden></div>
   </section>
 
+  {% if email and not locked %}
+  <section class="card" id="history" hidden>
+    <h2>Mes profils</h2>
+    <p class="hint" id="history-note"></p>
+    <ul class="history" id="history-list"></ul>
+    <div id="history-msg" class="flash" hidden></div>
+  </section>
+  {% endif %}
+
   <section class="card" id="result" hidden>
     <h2>2. Votre voix de marque — <span id="res-name"></span></h2>
     <p class="summary" id="res-summary"></p>
@@ -134,7 +143,7 @@
     <details><summary>Que fait exactement l'outil ?</summary><p>Il lit le texte principal de vos pages, puis un modèle de langage en distille les règles de votre voix sur 5 axes : ton, style de phrase, vocabulaire (mots-signature et mots à éviter), structure, principes éditoriaux. Chaque trait est ancré sur des tournures réellement présentes dans vos textes. Rien n'est inventé.</p></details>
     <details><summary>Pourquoi mes URLs sont refusées ?</summary><p>Parce que l'extraction est vide ou trop courte : page d'accueil, catégorie, page vitrine, paywall, ou site qui bloque les robots. Une mauvaise extraction donnerait un profil bidon, on préfère refuser proprement. Prenez des articles complets, de {{ min_words }} mots minimum.</p></details>
     <details><summary>Le résultat est-il stable ?</summary><p>Oui, la distillation tourne à température basse : mêmes URLs, même profil (à quelques mots près).</p></details>
-    <details><summary>Que stockez-vous ?</summary><p>Rien du contenu de vos pages ni du profil généré. Seulement des compteurs d'usage (anonymes) et, si vous le donnez, votre email pour le lien d'accès et un éventuel contact. Voir la <a href="{{ settings.privacy_url }}" target="_blank" rel="noopener">politique de confidentialité</a>.</p></details>
+    <details><summary>Que stockez-vous ?</summary><p>Rien du contenu de vos pages. Sans compte, rien du profil généré non plus : seulement des compteurs d'usage anonymes. Avec un compte, vos profils sont gardés dans « Mes profils », avec l'adresse et le titre des articles lus, pour que vous les retrouviez ; ils sont effacés au bout de la durée de conservation indiquée, et vous pouvez les supprimer vous-même à tout moment. Votre email sert au lien d'accès et à un éventuel contact. Voir la <a href="{{ settings.privacy_url }}" target="_blank" rel="noopener">politique de confidentialité</a>.</p></details>
     <details><summary>Skill ou bloc prompt ?</summary><p>Le bloc prompt marche partout, c'est le défaut. Le skill est le même contenu, emballé pour Claude Code et les runtimes qui chargent des skills automatiquement. Tout est dedans dans les deux cas, aucun fichier externe.</p></details>
   </section>
 </main>
@@ -262,6 +271,7 @@
         return;
       }
       renderResult(data);
+      loadHistory();
     } catch (err) {
       showError('Erreur réseau. Réessayez.');
     } finally { setBusy(false); }
@@ -291,6 +301,61 @@
     result.hidden = false;
     result.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
+
+  // Historique : profils du compte, rechargés tels quels (bloc prompt et SKILL.md recalculés côté serveur)
+  const history = $('#history');
+  function historyMessage(text, kind) {
+    const msg = $('#history-msg');
+    msg.textContent = text; msg.className = 'flash' + (kind ? ' ' + kind : ''); msg.hidden = !text;
+  }
+  function fillUrls(urls) {
+    while (urlList.querySelectorAll('input').length < Math.min(urls.length, MAX_URLS)) $('#add-url').click();
+    urlList.querySelectorAll('input').forEach((input, i) => { input.value = urls[i] || ''; });
+    $('#form-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  async function loadHistory() {
+    if (!history) return;
+    const res = await fetch(ROOT + '/api/history').catch(() => null);
+    const data = res ? await res.json().catch(() => null) : null;
+    if (!data || !data.ok) return;
+    const months = data.retention_months;
+    $('#history-note').textContent = (months ? 'Chaque profil est conservé ' + months + ' mois' : 'Vos profils sont conservés sans limite de durée')
+      + ', ' + data.max_profiles + ' au plus : au-delà, le plus ancien laisse sa place.';
+    const ul = $('#history-list'); ul.innerHTML = '';
+    data.profiles.forEach(p => {
+      const li = document.createElement('li');
+      const info = document.createElement('div');
+      const title = document.createElement('strong'); title.textContent = p.name;
+      const date = document.createElement('span'); date.className = 'note';
+      date.textContent = ' · ' + new Date(p.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+      info.append(title, date);
+      if (p.expired) { const tag = document.createElement('span'); tag.className = 'pill'; tag.textContent = 'expiré'; info.append(' ', tag); }
+      const urls = document.createElement('div'); urls.className = 'hint small'; urls.textContent = p.urls.join(' · ');
+      info.appendChild(urls);
+      const actions = document.createElement('div'); actions.className = 'actions';
+      const open = document.createElement('button'); open.className = 'ghost';
+      open.textContent = p.expired ? 'Reprendre ces URLs' : 'Afficher';
+      open.addEventListener('click', async () => {
+        historyMessage('');
+        if (p.expired) { fillUrls(p.urls); return; }
+        const r = await fetch(ROOT + '/api/history/' + encodeURIComponent(p.id)).catch(() => null);
+        const d = r ? await r.json().catch(() => null) : null;
+        if (d && d.ok) { renderResult(d); } else { historyMessage((d && d.message) || 'Erreur réseau. Réessayez.', 'err'); loadHistory(); }
+      });
+      const del = document.createElement('button'); del.className = 'link'; del.textContent = 'Supprimer';
+      del.addEventListener('click', async () => {
+        if (!confirm('Supprimer le profil « ' + p.name + ' » ?')) return;
+        await fetch(ROOT + '/api/history/' + encodeURIComponent(p.id), { method: 'DELETE' }).catch(() => null);
+        if (lastData && lastData.id === p.id) result.hidden = true;
+        loadHistory();
+      });
+      actions.append(open, del);
+      li.append(info, actions);
+      ul.appendChild(li);
+    });
+    history.hidden = data.profiles.length === 0;
+  }
+  loadHistory();
 
   document.querySelectorAll('.tab').forEach(btn => btn.addEventListener('click', () => {
     document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b === btn));

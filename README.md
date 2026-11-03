@@ -22,11 +22,18 @@ visiteur ──> FastAPI (1 worker, ~80 Mo)
                ├──> crawl4ai (existant) : POST /crawl → markdown "fit" → nettoyage + seuils de mots
                ├──> omniroute (existant) : POST /chat/completions, T° 0.2 → guide 5 axes (Markdown)
                │  3. enrobage déterministe → prompt universel + SKILL.md (téléchargeable en .md ou .zip importable dans Claude)
-               └──> Postgres minuscule : usage_counters (day, scope, key, count) + leads (email…)
+               └──> Postgres minuscule : usage_counters, leads, generation_costs, profiles (historique)
 ```
 
-- Aucun contenu scrapé ni profil n'est stocké : tout vit en mémoire le temps de la requête. Le
-  téléchargement du skill est lui aussi stateless (le navigateur renvoie le contenu généré).
+- Aucun contenu scrapé n'est stocké : le texte des pages vit en mémoire le temps de la requête. Le
+  téléchargement du skill est stateless (le navigateur renvoie le contenu généré).
+- **Historique « Mes profils »** (comptes identifiés seulement) : table `profiles` avec le guide, le
+  résumé, le nom, et l'URL et le titre des pages lues. Bloc prompt et SKILL.md se recalculent à la
+  lecture. Conservation selon le niveau PMPro, mêmes noms et même logique que l'outil de clustering
+  (`FREE_RETENTION_MONTHS`, `LEVEL_RETENTION_MONTHS`) : au-delà, guide et résumé sont effacés et la ligne
+  reste, affichée « expiré » avec un bouton qui reprend les URLs. Plafond `HISTORY_MAX_PER_ACCOUNT` par
+  compte, le plus ancien part. Purge au démarrage et après chaque enregistrement, sans tâche planifiée.
+  Routes : `GET /api/history`, `GET /api/history/{id}`, `DELETE /api/history/{id}`.
 - Le **cap global quotidien** borne la charge et le budget LLM, même en pic viral. Le slot est réservé
   *avant* le travail coûteux et rendu en cas d'échec (entrée refusée, panne scraper/LLM).
 - Le LLM ne produit **que** le guide 5 axes ; les templates (B1/B2) et la sélection d'extraits sont
@@ -116,6 +123,9 @@ Le secret `WP_TOKEN_SECRET` = `CREAPULSE_TOOLS_TOKEN_SECRET` côté WordPress. V
 | `GLOBAL_DAILY_CAP` | 40 | tous visiteurs — protège le budget en dur |
 | `LLM_MODEL` / `LLM_TEMPERATURE` | `openai/gpt-5.4-mini` / 0.2 | choix du modèle dans omniroute ; T° basse = mêmes URLs → même profil |
 | `MAX_GUIDE_CHARS` | 5000 | plafond du guide 5 axes, garanti par le code (voir ci-dessous) |
+| `FREE_RETENTION_MONTHS` | 3 | conservation d'un profil dans l'historique, sans niveau PMPro |
+| `LEVEL_RETENTION_MONTHS` | (vide) | conservation par niveau, `niveau:mois` séparés par des virgules (ex. `5:6,7:12`) ; `0` = sans limite ; le niveau le plus généreux l'emporte |
+| `HISTORY_MAX_PER_ACCOUNT` | 20 | profils gardés par compte (~6 Ko chacun) |
 | `LLM_PRICE_IN_PER_M` / `LLM_PRICE_OUT_PER_M` | 0.75 / 4.50 | prix du modèle en $ par million de jetons ; sert seulement quand omniroute n'annonce pas le coût d'un appel |
 
 Si le modèle refuse `temperature` (famille reasoning), l'app réessaie automatiquement sans.
@@ -166,3 +176,6 @@ omniroute garde le total par clé (clé dédiée à cet outil).
 - Table `leads` : email, dates (création, consentement, vérification, dernière visite), nombre de générations.
   Rien d'autre. Les IP ne sont stockées que hachées (HMAC + `SECRET_KEY`), dans des compteurs purgés après 7 jours.
 - Le contenu scrapé n'est jamais persisté.
+- Table `profiles` : pour un compte identifié, ses profils (guide, résumé, URL et titre des pages lues),
+  effacés au bout de la durée de conservation ; suppression à la demande depuis « Mes profils ».
+  Rien pour un visiteur anonyme. La politique de confidentialité du site doit mentionner cet historique.

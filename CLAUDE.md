@@ -28,7 +28,9 @@ Détails d'archi, fichiers, variables et déploiement : [README.md](./README.md)
 - **Pas d'extraits verbatim** dans l'artefact (option retirée le 2026-09-08 : complexité inutile, et risque de
   calquer le sujet plutôt que la mécanique). Les règles explicites seules. Le verbatim reste l'argument du
   « système complet » (upsell).
-- **Rien du contenu scrapé n'est stocké.** Le store ne contient que compteurs + leads.
+- **Rien du contenu scrapé n'est stocké.** Le store contient compteurs, leads, coûts par génération et,
+  pour un compte identifié seulement, l'historique de ses profils (guide + URL/titre des pages), purgé
+  selon la durée de conservation. Jamais le texte des pages.
 - Secrets uniquement en variables d'env Coolify. Ne jamais committer `.env`.
 - Repo sur Google Drive : avant toute opération git, `find .git -name desktop.ini -delete`.
 

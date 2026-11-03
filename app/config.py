@@ -123,9 +123,29 @@ class Settings:
     smtp_from: str = os.getenv("SMTP_FROM", "Creapulse <no-reply@creapulse.fr>")
     smtp_tls: bool = _bool("SMTP_TLS", True)
 
+    # --- Historique des profils (comptes identifiés seulement) ---
+    # Mêmes noms et même logique que l'outil de clustering : conservation selon le niveau PMPro,
+    # au-delà le profil est effacé et la ligne reste (l'historique dit « expiré »).
+    free_retention_months: int = _int("FREE_RETENTION_MONTHS", 3)
+    level_retention_months: str = os.getenv("LEVEL_RETENTION_MONTHS", "")  # "niveau:mois", ex. "5:6,7:12" ; 0 = sans limite
+    # Plafond par compte : au-delà, le plus ancien est supprimé. Un profil pèse ~6 Ko, 20 profils ~120 Ko.
+    history_max_per_account: int = _int("HISTORY_MAX_PER_ACCOUNT", 20)
+
     trusted_proxies: bool = _bool("TRUST_PROXY_HEADERS", True)
 
     extra: dict = field(default_factory=dict)
+
+    def retention_months(self, levels: tuple[int, ...] = ()) -> int:
+        """Conservation d'un profil : la plus généreuse parmi les niveaux du membre, sinon le gratuit."""
+        per_level = {}
+        for part in self.level_retention_months.replace(";", ",").split(","):
+            lv, _, months = part.partition(":")
+            if lv.strip().isdigit() and months.strip().isdigit():
+                per_level[int(lv)] = int(months)
+        values = [per_level[lv] for lv in levels if lv in per_level]
+        if 0 in values:  # un niveau sans limite l'emporte
+            return 0
+        return max(values, default=self.free_retention_months)
 
     @property
     def mail_mode(self) -> str:

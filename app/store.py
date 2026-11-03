@@ -1,12 +1,15 @@
-"""Store minuscule : 3 tables (usage_counters, leads, generation_costs).
+"""Store minuscule : 4 tables (usage_counters, leads, generation_costs, profiles).
 
 Postgres en prod (DATABASE_URL=postgresql://…), SQLite en dev/tests (défaut).
-Aucun contenu scrapé ni profil généré n'est stocké — uniquement des compteurs, des emails et le coût
-de chaque génération (ni adresse, ni URL, ni texte).
+Aucun contenu scrapé n'est stocké. Le profil généré l'est pour un compte identifié seulement (son
+historique), avec l'URL et le titre des pages lues ; il est effacé au bout de la durée de conservation.
+Le coût de chaque génération est relevé sans adresse, sans URL et sans texte.
 """
 from __future__ import annotations
 
 import datetime as dt
+import json
+import secrets
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -47,7 +50,24 @@ SCHEMA = [
         cost_complete     INTEGER NOT NULL DEFAULT 0,
         cost_llm_source   TEXT
     )""",
+    # Historique d'un compte identifié. Le guide seul suffit : bloc prompt et SKILL.md se recalculent.
+    """CREATE TABLE IF NOT EXISTS profiles (
+        id               TEXT PRIMARY KEY,
+        owner            TEXT NOT NULL,
+        created_at       TEXT NOT NULL,
+        name             TEXT NOT NULL,
+        slug             TEXT NOT NULL,
+        pages            TEXT NOT NULL,
+        summary          TEXT,
+        guide            TEXT,
+        retention_months INTEGER NOT NULL DEFAULT 0,
+        purged_at        TEXT
+    )""",
+    "CREATE INDEX IF NOT EXISTS profiles_owner ON profiles (owner, created_at)",
 ]
+
+PROFILE_LIST_COLUMNS = ["id", "created_at", "name", "slug", "pages", "summary", "retention_months", "purged_at"]
+MONTH_DAYS = 30.44  # même conversion que la purge du clustering
 
 COST_COLUMNS = ["created_at", "status", "pages", "words", "model", "llm_calls", "prompt_tokens",
                 "completion_tokens", "cost_llm_usd", "cost_data_usd", "cost_other_usd", "cost_complete",
@@ -198,6 +218,69 @@ class Store:
         with self._conn() as c:
             rows = c.execute(sql, (limit,)).fetchall()
         return [dict(zip(COST_COLUMNS, row)) for row in rows]
+
+    # --- historique des profils -------------------------------------------
+    def save_profile(self, *, owner: str, name: str, slug: str, pages: list[dict], summary: str, guide: str,
+                     retention_months: int) -> str:
+        """Enregistre un profil et ne garde que les `history_max_per_account` plus récents du compte."""
+        owner = owner.strip().lower()
+        profile_id = secrets.token_urlsafe(12)
+        # Horodatage à la microseconde : deux profils du même compte ne tombent jamais ex aequo
+        created = dt.datetime.now(dt.timezone.utc).isoformat(timespec="microseconds")
+        sql = self._q("INSERT INTO profiles (id, owner, created_at, name, slug, pages, summary, guide, retention_months) "
+                      "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)")
+        trim = self._q("DELETE FROM profiles WHERE owner = %s AND id NOT IN "
+                       "(SELECT id FROM profiles WHERE owner = %s ORDER BY created_at DESC LIMIT %s)")
+        with self._conn() as c:
+            c.execute(sql, (profile_id, owner, created, name, slug, json.dumps(pages, ensure_ascii=False),
+                            summary, guide, retention_months))
+            c.execute(trim, (owner, owner, max(1, settings.history_max_per_account)))
+        return profile_id
+
+    def list_profiles(self, owner: str) -> list[dict]:
+        """Les profils du compte, du plus récent au plus ancien, sans le guide."""
+        sql = self._q(f"SELECT {', '.join(PROFILE_LIST_COLUMNS)} FROM profiles WHERE owner = %s "
+                      "ORDER BY created_at DESC")
+        with self._conn() as c:
+            rows = c.execute(sql, (owner.strip().lower(),)).fetchall()
+        return [self._profile_row(dict(zip(PROFILE_LIST_COLUMNS, row))) for row in rows]
+
+    def get_profile(self, owner: str, profile_id: str) -> dict | None:
+        """Le profil complet, ou None s'il n'existe pas ou appartient à un autre compte."""
+        cols = PROFILE_LIST_COLUMNS + ["guide"]
+        sql = self._q(f"SELECT {', '.join(cols)} FROM profiles WHERE owner = %s AND id = %s")
+        with self._conn() as c:
+            row = c.execute(sql, (owner.strip().lower(), profile_id)).fetchone()
+        return self._profile_row(dict(zip(cols, row))) if row else None
+
+    def delete_profile(self, owner: str, profile_id: str) -> bool:
+        sql = self._q("DELETE FROM profiles WHERE owner = %s AND id = %s")
+        with self._conn() as c:
+            return c.execute(sql, (owner.strip().lower(), profile_id)).rowcount > 0
+
+    def purge_expired_profiles(self, now: dt.datetime | None = None) -> int:
+        """Efface le contenu des profils dont la conservation est dépassée. La ligne reste : l'historique
+        montre le profil comme expiré au lieu de le faire disparaître sans explication."""
+        now = now or dt.datetime.now(dt.timezone.utc)
+        sql = self._q("SELECT id, created_at, retention_months FROM profiles "
+                      "WHERE purged_at IS NULL AND retention_months > 0")
+        with self._conn() as c:
+            rows = c.execute(sql).fetchall()
+        expired = [pid for pid, created, months in rows
+                   if (now - dt.datetime.fromisoformat(created)).days >= months * MONTH_DAYS]
+        if expired:
+            upd = self._q("UPDATE profiles SET guide = NULL, summary = NULL, purged_at = %s WHERE id = %s")
+            ts = now.isoformat(timespec="seconds")
+            with self._conn() as c:
+                for pid in expired:
+                    c.execute(upd, (ts, pid))
+        return len(expired)
+
+    @staticmethod
+    def _profile_row(row: dict) -> dict:
+        row["pages"] = json.loads(row["pages"] or "[]")
+        row["purged"] = row.pop("purged_at") is not None
+        return row
 
 
 _store: Store | None = None
