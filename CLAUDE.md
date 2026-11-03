@@ -4,10 +4,11 @@ Point d'entrée pour reprendre le projet dans ce dossier.
 
 ## Ce qu'est ce projet
 
-**« Générateur de skill de voix de marque IA »** — outil gratuit lead-gen sur creapulse.fr.
+**« Générateur de skill de voix de marque IA »** — outil membre de creapulse.fr, payé en crédits.
 1-5 URLs d'articles → crawl4ai (scrape) → omniroute (distillation LLM, T° basse) → profil de voix
 sur 5 axes, rendu en 2 formats **self-contained** (bloc prompt universel / `SKILL.md` standalone).
-Gating : 1 génération anonyme, puis email magic-link ; caps compte / IP / global. CTA = automatiser
+Compte WordPress obligatoire ; chaque génération est payée en crédits du porte-monnaie commun
+(creapulse-tools 079, `app/wallet.py`) ; caps compte / global. CTA = automatiser
 la production de contenu à cette voix (services Creapulse). Le « comment » de l'automatisation n'est
 jamais révélé au visiteur.
 

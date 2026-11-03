@@ -13,6 +13,7 @@ from app.config import settings
 from app.distill import SUGGESTION_MARK, build_system_prompt, count_suggestions
 from app.distill import Guide
 from app.scraper import PageText, word_count
+from conftest import login
 
 GUIDE_AVEC = """## Ton
 - **Adresse directe** : « Vous me direz »
@@ -97,6 +98,7 @@ def client(monkeypatch):
     monkeypatch.setattr(main, "rate_limiter", gating.RateLimiter(1000))
     monkeypatch.setattr(settings, "min_urls", 1)
     with TestClient(main.app) as c:
+        login(c)
         yield c
 
 
