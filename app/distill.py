@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import httpx
 
 from .config import settings
+from .costs import COST_HEADER, CostMeter
 from .scraper import PageText
 
 log = logging.getLogger("voice-skill.distill")
@@ -230,7 +231,8 @@ def trim_to_budget(sections: dict[str, str], max_chars: int) -> tuple[dict[str, 
     return sections, removed
 
 
-async def _chat(messages: list[dict], client: httpx.AsyncClient, with_temperature: bool = True) -> tuple[str, dict, str]:
+async def _chat(messages: list[dict], client: httpx.AsyncClient, with_temperature: bool = True,
+                meter: CostMeter | None = None) -> tuple[str, dict, str]:
     body: dict = {
         "model": settings.llm_model,
         "messages": messages,
@@ -249,10 +251,13 @@ async def _chat(messages: list[dict], client: httpx.AsyncClient, with_temperatur
         raise DistillError(f"LLM injoignable : {exc.__class__.__name__}") from exc
     if resp.status_code == 400 and with_temperature and "temperature" in resp.text.lower():
         # Certains modèles (famille reasoning) refusent temperature ≠ 1 → on réessaie sans.
-        return await _chat(messages, client, with_temperature=False)
+        return await _chat(messages, client, with_temperature=False, meter=meter)
     if resp.status_code != 200:
         raise DistillError(f"LLM HTTP {resp.status_code} : {resp.text[:200]}")
     data = resp.json()
+    if meter is not None:
+        # Compté dès que le modèle a répondu : un contenu inexploitable a quand même été facturé.
+        meter.add_llm_call(data.get("usage"), resp.headers.get(COST_HEADER))
     try:
         content = data["choices"][0]["message"]["content"] or ""
     except (KeyError, IndexError, TypeError) as exc:
@@ -266,7 +271,7 @@ def _merge_usage(a: dict, b: dict) -> dict:
 
 
 async def enforce_budget(canonical: str, sections: dict[str, str], summary: str,
-                         client: httpx.AsyncClient) -> tuple[str, dict[str, str], str, dict]:
+                         client: httpx.AsyncClient, meter: CostMeter | None = None) -> tuple[str, dict[str, str], str, dict]:
     """Garantit que le guide tient sous le plafond. Une passe LLM de raccourcissement ciblé, puis un
     filet déterministe. Le plafond est tenu par le code, jamais par la seule consigne au modèle."""
     max_chars = settings.max_guide_chars
@@ -282,6 +287,7 @@ async def enforce_budget(canonical: str, sections: dict[str, str], summary: str,
                                                                min_repertoire=settings.min_repertoire,
                                                                guide=canonical)}],
             client,
+            meter=meter,
         )
         short_canonical, short_sections, short_summary = parse_guide(content)
         # On ne garde la version courte que si elle est effectivement plus courte et non vidée.
@@ -300,7 +306,8 @@ async def enforce_budget(canonical: str, sections: dict[str, str], summary: str,
     return canonical, sections, summary, usage
 
 
-async def distill(pages: list[PageText], brand_name: str, client: httpx.AsyncClient | None = None) -> Guide:
+async def distill(pages: list[PageText], brand_name: str, client: httpx.AsyncClient | None = None,
+                  meter: CostMeter | None = None) -> Guide:
     own = client is None
     client = client or httpx.AsyncClient(timeout=settings.llm_timeout_s)
     messages = [
@@ -308,7 +315,7 @@ async def distill(pages: list[PageText], brand_name: str, client: httpx.AsyncCli
         {"role": "user", "content": build_user_prompt(pages, brand_name)},
     ]
     try:
-        content, usage, model = await _chat(messages, client)
+        content, usage, model = await _chat(messages, client, meter=meter)
         try:
             canonical, sections, summary = parse_guide(content)
         except DistillError as first:
@@ -318,13 +325,13 @@ async def distill(pages: list[PageText], brand_name: str, client: httpx.AsyncCli
                 {"role": "user", "content": "Ta réponse ne respecte pas le format. Renvoie le guide COMPLET avec "
                                             "exactement les 6 sections H2 demandées, dans l'ordre, et rien d'autre."},
             ]
-            content, usage2, model = await _chat(retry, client)
+            content, usage2, model = await _chat(retry, client, meter=meter)
             try:
                 canonical, sections, summary = parse_guide(content)
             except DistillError as second:
                 raise DistillError(f"profil non conforme après relance ({second})") from first
             usage = _merge_usage(usage, usage2)
-        canonical, sections, summary, extra = await enforce_budget(canonical, sections, summary, client)
+        canonical, sections, summary, extra = await enforce_budget(canonical, sections, summary, client, meter=meter)
         usage = _merge_usage(usage, extra)
     finally:
         if own:

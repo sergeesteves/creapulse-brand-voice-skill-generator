@@ -20,7 +20,7 @@ def client(monkeypatch):
     async def fake_fetch(urls, client=None):
         return [PageText(u, "Titre " + u[-1], PROSE, word_count(PROSE), True, "", "fr") for u in urls]
 
-    async def fake_distill(pages, name, client=None):
+    async def fake_distill(pages, name, client=None, meter=None):
         return Guide(GUIDE_MD, {}, "Une voix orale et directe.", "fake-model", {"total_tokens": 10})
 
     monkeypatch.setattr(main, "fetch_pages", fake_fetch)

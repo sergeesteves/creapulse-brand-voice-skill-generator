@@ -24,6 +24,7 @@ from . import distill as distill_mod
 from . import gating, render
 from . import wp_token as wp_token_mod
 from .config import settings
+from .costs import CostMeter
 from .distill import DistillError, distill
 from .mailer import send_magic_link
 from .scraper import InputError, ScrapeError, check_corpus, fetch_pages, parse_urls
@@ -203,6 +204,17 @@ async def health():
 # Génération
 # ---------------------------------------------------------------------------
 
+def _record_cost(store, status: str, pages: list, model: str | None, meter: CostMeter) -> None:
+    """Enregistre le coût d'une génération qui a appelé le modèle. Ne fait jamais échouer la réponse."""
+    if not meter.llm_calls:
+        return
+    try:
+        store.record_generation_cost(status=status, pages=len(pages), words=sum(p.words for p in pages),
+                                     model=model or settings.llm_model, meter=meter)
+    except Exception as exc:  # le relevé de coût ne doit pas priver le visiteur de son profil
+        log.warning("coût de génération non enregistré : %s", exc)
+
+
 @app.post("/api/generate")
 async def api_generate(request: Request, payload: dict = Body(...)):
     ip = client_ip(request)
@@ -234,11 +246,13 @@ async def api_generate(request: Request, payload: dict = Body(...)):
         return _error(status, decision.reason, decision.message, cta_url=settings.cta_url)
 
     http: httpx.AsyncClient = request.app.state.http
+    meter = CostMeter()
+    good: list = []
     try:
         pages = await fetch_pages(urls, client=http)
         good = check_corpus(pages)
         name, slug = render.brand_from_urls([p.url for p in good])
-        guide = await distill(good, name, client=http)
+        guide = await distill(good, name, client=http, meter=meter)
     except InputError as exc:
         gate.release(reserved)
         return _error(422, "input", str(exc), pages=[_page_view(p) for p in pages] if "pages" in locals() else [])
@@ -249,11 +263,13 @@ async def api_generate(request: Request, payload: dict = Body(...)):
     except DistillError as exc:
         gate.release(reserved)
         log.error("distill: %s", exc)
+        _record_cost(store, "distill_failed", good, None, meter)
         return _error(503, "distill", "La distillation n'a pas produit un profil conforme. "
                                       "Réessayez (ou essayez avec d'autres articles).")
     except Exception as exc:  # pragma: no cover — filet
         gate.release(reserved)
         log.exception("generate failed: %s", exc)
+        _record_cost(store, "error", good, None, meter)
         return _error(500, "internal", "Erreur inattendue. Réessayez plus tard.")
 
     prompt_block = render.render_prompt_block(name, guide.markdown)
@@ -261,9 +277,10 @@ async def api_generate(request: Request, payload: dict = Body(...)):
 
     if email:
         store.bump_lead_generations(email)
-    log.info("generation ok ip=%s email=%s pages=%d words=%d guide=%dc model=%s usage=%s",
+    _record_cost(store, "ok", good, guide.model, meter)
+    log.info("generation ok ip=%s email=%s pages=%d words=%d guide=%dc model=%s usage=%s cost=%.5f$ (%s, %d appel(s))",
              gating.ip_key(ip)[:8], "yes" if email else "no", len(good), sum(p.words for p in good),
-             len(guide.markdown), guide.model, guide.usage)
+             len(guide.markdown), guide.model, guide.usage, meter.llm_usd, meter.llm_source, meter.llm_calls)
 
     resp = JSONResponse({
         "ok": True,

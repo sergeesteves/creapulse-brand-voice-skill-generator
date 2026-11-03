@@ -116,6 +116,7 @@ Le secret `WP_TOKEN_SECRET` = `CREAPULSE_TOOLS_TOKEN_SECRET` côté WordPress. V
 | `GLOBAL_DAILY_CAP` | 40 | tous visiteurs — protège le budget en dur |
 | `LLM_MODEL` / `LLM_TEMPERATURE` | `openai/gpt-5.4-mini` / 0.2 | choix du modèle dans omniroute ; T° basse = mêmes URLs → même profil |
 | `MAX_GUIDE_CHARS` | 5000 | plafond du guide 5 axes, garanti par le code (voir ci-dessous) |
+| `LLM_PRICE_IN_PER_M` / `LLM_PRICE_OUT_PER_M` | 0.75 / 4.50 | prix du modèle en $ par million de jetons ; sert seulement quand omniroute n'annonce pas le coût d'un appel |
 
 Si le modèle refuse `temperature` (famille reasoning), l'app réessaie automatiquement sans.
 
@@ -141,8 +142,23 @@ puisque ce sont eux qui transmettent la voix.
 
 ## Suivi coût / usage
 
-Chaque génération est loguée (`generation ok … model=… usage=…`) avec les tokens renvoyés par omniroute.
-Le tracking centralisé se lit dans le dashboard omniroute (clé API dédiée à cet outil → filtre par clé).
+Chaque génération qui a appelé le modèle, réussie ou non, enregistre son coût dans la table
+`generation_costs` (`app/costs.py`), au format attendu par le porte-monnaie de crédits de creapulse-tools :
+`cost_llm_usd`, `cost_data_usd`, `cost_other_usd` et `cost_complete`. Aucune adresse, URL ni texte n'y figure.
+
+| Poste | Comment il est obtenu |
+|---|---|
+| llm | coût annoncé par omniroute pour chaque appel (en-tête `X-OmniRoute-Response-Cost`) ; à défaut, jetons × prix de la config, et la ligne le dit (`cost_llm_source` = `estimated`) |
+| data | 0 : crawl4ai auto-hébergé sans proxy payant, ou lecture directe ; le serveur est une charge fixe |
+| autre | 0 : ni Skills API, ni conteneur, ni autre API payante |
+
+Mesure du 2026-11-03 sur la clé omniroute de l'outil (toute sa durée de vie) : 8 appels, 71 287 jetons
+d'entrée, 12 118 de sortie, 0,1080 $, soit 0,0135 $ par appel. Le prix catalogue OpenRouter
+(0,75 $ / 4,50 $ par million) redonne exactement ce montant. Pire cas calculé depuis les plafonds
+(9 000 mots, relance de format et passe de raccourcissement) : environ 0,06 $.
+
+La ligne `generation ok …` du journal reprend le coût, sa source et le nombre d'appels. Le dashboard
+omniroute garde le total par clé (clé dédiée à cet outil).
 
 ## RGPD
 

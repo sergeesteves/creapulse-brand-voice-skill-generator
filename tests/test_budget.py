@@ -77,7 +77,7 @@ def test_over_budget_triggers_one_shortening_pass_without_resending_articles(mon
     calls = []
     short = make_sections(n_bullets=2, pad=10)
 
-    async def fake_chat(messages, client, with_temperature=True):
+    async def fake_chat(messages, client, with_temperature=True, meter=None):
         calls.append(messages)
         return canonical_markdown(short), {"total_tokens": 120}, "fake"
 
@@ -97,7 +97,7 @@ def test_over_budget_triggers_one_shortening_pass_without_resending_articles(mon
 
 def test_code_enforces_the_cap_when_the_model_ignores_it(monkeypatch):
     """Le modèle renvoie un guide toujours trop long : le filet déterministe tranche quand même."""
-    async def lazy_chat(messages, client, with_temperature=True):
+    async def lazy_chat(messages, client, with_temperature=True, meter=None):
         return canonical_markdown(make_sections(n_bullets=7)), {}, "fake"
 
     monkeypatch.setattr(distill_mod, "_chat", lazy_chat)

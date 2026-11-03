@@ -89,7 +89,7 @@ def client(monkeypatch):
     async def fake_fetch(urls, client=None):
         return [PageText(u, "T", PROSE, word_count(PROSE), True, "", "fr") for u in urls]
 
-    async def fake_distill(pages, name, client=None):
+    async def fake_distill(pages, name, client=None, meter=None):
         return Guide(GUIDE_AVEC, {}, "Une voix directe.", "fake", {})
 
     monkeypatch.setattr(main, "fetch_pages", fake_fetch)
