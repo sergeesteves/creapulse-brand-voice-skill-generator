@@ -63,6 +63,12 @@ label.check.locked { color: var(--muted); }
 .pages { list-style: none; padding: 0; margin: 0 0 16px; font-size: 14px; }
 .pages li { padding: 4px 0; }
 .pages li.ok { color: var(--ok); } .pages li.ko { color: var(--err); } .pages li.info { color: var(--muted); }
+.history { list-style: none; padding: 0; margin: 0; }
+.history li { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 12px 0; border-top: 1px solid var(--line); }
+.history li:first-child { border-top: 0; }
+.history .hint { margin: 4px 0 0; overflow-wrap: anywhere; }
+.history .actions { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
+@media (max-width: 560px) { .history li { flex-direction: column; align-items: flex-start; } }
 .tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); margin: 8px 0 12px; }
 .tab { background: none; border: 0; border-bottom: 3px solid transparent; padding: 10px 14px; font: inherit; font-weight: 600; cursor: pointer; color: var(--muted); }
 .tab.active { color: var(--ink); border-bottom-color: var(--secondary); }

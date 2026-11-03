@@ -31,7 +31,7 @@
     <p class="kicker">Outil gratuit</p>
     <h1>Générateur de skill de voix de marque IA</h1>
     <p class="lead">Vous avez déjà une voix. Elle est dans vos articles. Collez {{ min_urls }} à {{ max_urls }} URLs de textes que <strong>vous</strong> avez écrits : l'outil en distille les règles (ton, phrases, vocabulaire, structure, positionnement) et vous rend un profil prêt à coller dans ChatGPT ou Claude — en bloc prompt, ou en skill.</p>
-    <p class="note">Pas de compte pour la première génération. Le contenu de vos pages n'est pas conservé : il est lu, distillé, puis oublié.</p>
+    <p class="note">Pas de compte pour la première génération. Le contenu de vos pages n'est pas conservé : il est lu, distillé, puis oublié. Le profil non plus, sauf si vous choisissez de le garder dans votre compte.</p>
   </section>
 
   {% if embed %}
@@ -69,6 +69,9 @@
         <button type="button" class="ghost" id="add-url">+ Ajouter une URL (max {{ max_urls }})</button>
       </div>
       <p class="hint small">Le profil ne contient que des règles explicites, ancrées sur vos textes : c'est ce qui se transfère le mieux à un nouveau sujet. Pour plus de fidélité, ajoutez vous-même votre meilleur article en exemple dans votre conversation.</p>
+      {% if email %}
+      <label class="check"><input type="checkbox" id="save-profile"> Garder ce profil dans « Mes profils » pour le retrouver plus tard ({% if retention_months %}conservé {{ retention_months }} mois{% else %}sans limite de durée{% endif %}, supprimable à tout moment). Sans cette case, il n'est conservé nulle part.</label>
+      {% endif %}
       <div class="row">
         <button type="submit" class="primary" id="submit">Distiller ma voix</button>
         <span id="progress" class="progress" hidden><span class="spinner"></span> <span id="progress-text">Lecture des pages…</span></span>
@@ -76,6 +79,15 @@
     </form>
     <div id="error" class="flash err" hidden></div>
   </section>
+
+  {% if email and not locked %}
+  <section class="card" id="history" hidden>
+    <h2>Mes profils</h2>
+    <p class="hint" id="history-note"></p>
+    <ul class="history" id="history-list"></ul>
+    <div id="history-msg" class="flash" hidden></div>
+  </section>
+  {% endif %}
 
   <section class="card" id="result" hidden>
     <h2>2. Votre voix de marque — <span id="res-name"></span></h2>
@@ -134,7 +146,7 @@
     <details><summary>Que fait exactement l'outil ?</summary><p>Il lit le texte principal de vos pages, puis un modèle de langage en distille les règles de votre voix sur 5 axes : ton, style de phrase, vocabulaire (mots-signature et mots à éviter), structure, principes éditoriaux. Chaque trait est ancré sur des tournures réellement présentes dans vos textes. Rien n'est inventé.</p></details>
     <details><summary>Pourquoi mes URLs sont refusées ?</summary><p>Parce que l'extraction est vide ou trop courte : page d'accueil, catégorie, page vitrine, paywall, ou site qui bloque les robots. Une mauvaise extraction donnerait un profil bidon, on préfère refuser proprement. Prenez des articles complets, de {{ min_words }} mots minimum.</p></details>
     <details><summary>Le résultat est-il stable ?</summary><p>Oui, la distillation tourne à température basse : mêmes URLs, même profil (à quelques mots près).</p></details>
-    <details><summary>Que stockez-vous ?</summary><p>Rien du contenu de vos pages ni du profil généré. Seulement des compteurs d'usage (anonymes) et, si vous le donnez, votre email pour le lien d'accès et un éventuel contact. Voir la <a href="{{ settings.privacy_url }}" target="_blank" rel="noopener">politique de confidentialité</a>.</p></details>
+    <details><summary>Que stockez-vous ?</summary><p>Rien du contenu de vos pages, et rien du profil généré par défaut : seulement des compteurs d'usage anonymes. Si vous êtes connecté et cochez « Garder ce profil », ce profil-là est rangé dans « Mes profils », avec l'adresse et le titre des articles lus ; il est effacé au bout de la durée de conservation indiquée, et vous pouvez le supprimer vous-même à tout moment. Sans la case, rien n'est gardé. Votre email sert au lien d'accès et à un éventuel contact. Voir la <a href="{{ settings.privacy_url }}" target="_blank" rel="noopener">politique de confidentialité</a>.</p></details>
     <details><summary>Skill ou bloc prompt ?</summary><p>Le bloc prompt marche partout, c'est le défaut. Le skill est le même contenu, emballé pour Claude Code et les runtimes qui chargent des skills automatiquement. Tout est dedans dans les deux cas, aucun fichier externe.</p></details>
   </section>
 </main>
@@ -251,7 +263,7 @@
     try {
       const res = await fetch(ROOT + '/api/generate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ urls })
+        body: JSON.stringify({ urls, save: !!($('#save-profile') && $('#save-profile').checked) })
       });
       const data = await res.json();
       if (!data.ok) {
@@ -262,6 +274,7 @@
         return;
       }
       renderResult(data);
+      loadHistory();
     } catch (err) {
       showError('Erreur réseau. Réessayez.');
     } finally { setBusy(false); }
@@ -291,6 +304,61 @@
     result.hidden = false;
     result.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
+
+  // Historique : profils du compte, rechargés tels quels (bloc prompt et SKILL.md recalculés côté serveur)
+  const history = $('#history');
+  function historyMessage(text, kind) {
+    const msg = $('#history-msg');
+    msg.textContent = text; msg.className = 'flash' + (kind ? ' ' + kind : ''); msg.hidden = !text;
+  }
+  function fillUrls(urls) {
+    while (urlList.querySelectorAll('input').length < Math.min(urls.length, MAX_URLS)) $('#add-url').click();
+    urlList.querySelectorAll('input').forEach((input, i) => { input.value = urls[i] || ''; });
+    $('#form-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  async function loadHistory() {
+    if (!history) return;
+    const res = await fetch(ROOT + '/api/history').catch(() => null);
+    const data = res ? await res.json().catch(() => null) : null;
+    if (!data || !data.ok) return;
+    const months = data.retention_months;
+    $('#history-note').textContent = (months ? 'Chaque profil est conservé ' + months + ' mois' : 'Vos profils sont conservés sans limite de durée')
+      + ', ' + data.max_profiles + ' au plus : au-delà, le plus ancien laisse sa place.';
+    const ul = $('#history-list'); ul.innerHTML = '';
+    data.profiles.forEach(p => {
+      const li = document.createElement('li');
+      const info = document.createElement('div');
+      const title = document.createElement('strong'); title.textContent = p.name;
+      const date = document.createElement('span'); date.className = 'note';
+      date.textContent = ' · ' + new Date(p.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+      info.append(title, date);
+      if (p.expired) { const tag = document.createElement('span'); tag.className = 'pill'; tag.textContent = 'expiré'; info.append(' ', tag); }
+      const urls = document.createElement('div'); urls.className = 'hint small'; urls.textContent = p.urls.join(' · ');
+      info.appendChild(urls);
+      const actions = document.createElement('div'); actions.className = 'actions';
+      const open = document.createElement('button'); open.className = 'ghost';
+      open.textContent = p.expired ? 'Reprendre ces URLs' : 'Afficher';
+      open.addEventListener('click', async () => {
+        historyMessage('');
+        if (p.expired) { fillUrls(p.urls); return; }
+        const r = await fetch(ROOT + '/api/history/' + encodeURIComponent(p.id)).catch(() => null);
+        const d = r ? await r.json().catch(() => null) : null;
+        if (d && d.ok) { renderResult(d); } else { historyMessage((d && d.message) || 'Erreur réseau. Réessayez.', 'err'); loadHistory(); }
+      });
+      const del = document.createElement('button'); del.className = 'link'; del.textContent = 'Supprimer';
+      del.addEventListener('click', async () => {
+        if (!confirm('Supprimer le profil « ' + p.name + ' » ?')) return;
+        await fetch(ROOT + '/api/history/' + encodeURIComponent(p.id), { method: 'DELETE' }).catch(() => null);
+        if (lastData && lastData.id === p.id) result.hidden = true;
+        loadHistory();
+      });
+      actions.append(open, del);
+      li.append(info, actions);
+      ul.appendChild(li);
+    });
+    history.hidden = data.profiles.length === 0;
+  }
+  loadHistory();
 
   document.querySelectorAll('.tab').forEach(btn => btn.addEventListener('click', () => {
     document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b === btn));

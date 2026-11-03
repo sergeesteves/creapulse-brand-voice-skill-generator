@@ -58,6 +58,10 @@ async def lifespan(app: FastAPI):
         store.purge_old_counters()
     except Exception as exc:  # pragma: no cover
         log.warning("purge compteurs impossible : %s", exc)
+    try:
+        store.purge_expired_profiles()
+    except Exception as exc:  # pragma: no cover
+        log.warning("purge des profils expirés impossible : %s", exc)
     app.state.http = httpx.AsyncClient(timeout=max(settings.crawl_timeout_s, settings.llm_timeout_s))
     yield
     await app.state.http.aclose()
@@ -188,6 +192,7 @@ async def index(request: Request):
             "max_urls": settings.max_urls,
             "min_urls": settings.min_urls,
             "min_words": settings.min_words_per_page,
+            "retention_months": settings.retention_months(sess.levels if sess else ()),
         },
     )
     resp.headers["Referrer-Policy"] = "no-referrer"
@@ -272,31 +277,20 @@ async def api_generate(request: Request, payload: dict = Body(...)):
         _record_cost(store, "error", good, None, meter)
         return _error(500, "internal", "Erreur inattendue. Réessayez plus tard.")
 
-    prompt_block = render.render_prompt_block(name, guide.markdown)
-    skill_md = render.render_skill(name, slug, guide.summary, guide.markdown)
-
+    page_views = [_page_view(p) for p in pages]
+    profile_id = None
     if email:
         store.bump_lead_generations(email)
+        # Opt-in explicite : sans la case cochée, le profil n'est gardé nulle part
+        if payload.get("save") is True:
+            profile_id = _save_profile(store, sess, name, slug, page_views, guide)
     _record_cost(store, "ok", good, guide.model, meter)
     log.info("generation ok ip=%s email=%s pages=%d words=%d guide=%dc model=%s usage=%s cost=%.5f$ (%s, %d appel(s))",
              gating.ip_key(ip)[:8], "yes" if email else "no", len(good), sum(p.words for p in good),
              len(guide.markdown), guide.model, guide.usage, meter.llm_usd, meter.llm_source, meter.llm_calls)
 
-    resp = JSONResponse({
-        "ok": True,
-        "name": name,
-        "slug": slug,
-        "summary": guide.summary,
-        "guide": guide.markdown,
-        "prompt_block": prompt_block,
-        "skill_md": skill_md,
-        "skill_filename": render.skill_filename(slug),
-        "pages": [_page_view(p) for p in pages],
-        "suggestions": distill_mod.count_suggestions(guide.markdown),
-        "download_available": bool(email),
-        "connected": bool(email),
-        "cta_url": settings.cta_url,
-    })
+    resp = JSONResponse(_result_payload(name, slug, guide.summary, guide.markdown, page_views, bool(email),
+                                        profile_id))
     if not email:
         _set_cookie(resp, gating.ANON_COOKIE, gating.sign_anon(decision.anon_count), 365 * 24 * 3600)
     return resp
@@ -304,6 +298,87 @@ async def api_generate(request: Request, payload: dict = Body(...)):
 
 def _page_view(p) -> dict:
     return {"url": p.url, "title": p.title, "words": p.words, "ok": p.ok, "reason": p.reason}
+
+
+def _result_payload(name: str, slug: str, summary: str, guide_md: str, pages: list[dict], connected: bool,
+                    profile_id: str | None = None) -> dict:
+    """Réponse d'un profil, qu'il sorte d'une génération ou de l'historique : la page l'affiche pareil."""
+    return {
+        "ok": True,
+        "id": profile_id,
+        "name": name,
+        "slug": slug,
+        "summary": summary,
+        "guide": guide_md,
+        "prompt_block": render.render_prompt_block(name, guide_md),
+        "skill_md": render.render_skill(name, slug, summary, guide_md),
+        "skill_filename": render.skill_filename(slug),
+        "pages": pages,
+        "suggestions": distill_mod.count_suggestions(guide_md),
+        "download_available": connected,
+        "connected": connected,
+        "cta_url": settings.cta_url,
+    }
+
+
+def _save_profile(store, sess: gating.Session, name: str, slug: str, pages: list[dict], guide) -> str | None:
+    """Range le profil dans l'historique du compte. Ne fait jamais échouer la réponse."""
+    try:
+        profile_id = store.save_profile(owner=sess.email, name=name, slug=slug, pages=pages, summary=guide.summary,
+                                        guide=guide.markdown, retention_months=settings.retention_months(sess.levels))
+        store.purge_expired_profiles()
+        return profile_id
+    except Exception as exc:  # l'historique est un confort : le visiteur garde son profil à l'écran
+        log.warning("profil non enregistré dans l'historique : %s", exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Historique (compte identifié)
+# ---------------------------------------------------------------------------
+
+def _history_item(row: dict) -> dict:
+    return {"id": row["id"], "created_at": row["created_at"], "name": row["name"],
+            "urls": [p["url"] for p in row["pages"] if p.get("ok")], "summary": row["summary"],
+            "expired": row["purged"]}
+
+
+@app.get("/api/history")
+async def api_history(request: Request):
+    sess = _session(request)
+    if not sess:
+        return _error(403, "need_email", "L'historique est réservé aux comptes identifiés.")
+    rows = get_store().list_profiles(sess.email)
+    return {"ok": True, "profiles": [_history_item(r) for r in rows],
+            "retention_months": settings.retention_months(sess.levels),
+            "max_profiles": settings.history_max_per_account}
+
+
+@app.get("/api/history/{profile_id}")
+async def api_history_profile(request: Request, profile_id: str):
+    sess = _session(request)
+    if not sess:
+        return _error(403, "need_email", "L'historique est réservé aux comptes identifiés.")
+    row = get_store().get_profile(sess.email, profile_id[:64])
+    if not row:
+        return _error(404, "not_found", "Ce profil n'existe pas ou plus.")
+    if row["purged"]:
+        months = row["retention_months"]
+        return _error(410, "expired", f"Ce profil a dépassé sa durée de conservation ({months} mois) "
+                                      "et son contenu a été effacé. Relancez une génération avec les mêmes URLs.",
+                      urls=[p["url"] for p in row["pages"] if p.get("ok")])
+    return _result_payload(row["name"], row["slug"], row["summary"] or "", row["guide"], row["pages"], True,
+                           row["id"])
+
+
+@app.delete("/api/history/{profile_id}")
+async def api_history_delete(request: Request, profile_id: str):
+    sess = _session(request)
+    if not sess:
+        return _error(403, "need_email", "L'historique est réservé aux comptes identifiés.")
+    if not get_store().delete_profile(sess.email, profile_id[:64]):
+        return _error(404, "not_found", "Ce profil n'existe pas ou plus.")
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------
