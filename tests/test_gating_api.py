@@ -138,6 +138,39 @@ def test_a_refused_welcome_says_so_instead_of_a_bare_zero(client, fake_wallet, m
     assert r.status_code == 402 and "bienvenue" in r.json()["message"] and r.json()["recharge_url"]
 
 
+@pytest.mark.parametrize("override, unavailable", [
+    ({"can_start": {"generation": False}}, True),                    # outil décoché « Actif » : aucune raison donnée
+    ({"can_start": {}, "costs": {}}, True),                           # palier absent ou mal nommé
+    ({"can_start": {"generation": False}, "closed_reason": "tool_disabled"}, True),
+    ({"can_start": {"generation": False}, "closed_reason": "free_budget"}, False),
+])
+def test_a_blocked_tool_is_not_a_balance_problem(client, fake_wallet, monkeypatch, override, unavailable):
+    """Le solde couvre le prix mais le porte-monnaie refuse : recharger ne servirait à rien."""
+    real = fake_wallet.call
+
+    async def blocked(c, route, body):
+        out = await real(c, route, body)
+        return {**out, **override} if route == "balance" else out
+
+    monkeypatch.setattr("app.wallet.call", blocked)
+    login(client)
+    data = client.get("/api/credits").json()
+    assert data["can_start"] is False and data["balance"] == 50
+    if unavailable:
+        assert "indisponible" in data["message"] and data["recharge_url"] is None
+    else:
+        assert "essais gratuits" in data["message"] and data["recharge_url"]
+
+
+def test_a_disabled_tool_at_debit_offers_no_recharge(client, fake_wallet):
+    from app.wallet import WalletError
+    fake_wallet.fail("debit", WalletError(403, "tool_disabled", {"closed_reason": "tool_disabled", "retryable": False}))
+    login(client)
+    body = client.post("/api/generate", json={"urls": ["https://example.org/a"]}).json()
+    assert body["code"] == "closed" and "indisponible" in body["message"] and not body.get("recharge_url")
+    assert fake_wallet.balance == 50
+
+
 def test_rejected_pages_are_not_debited(client, monkeypatch, fake_wallet):
     from app import main
 

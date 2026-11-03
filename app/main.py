@@ -214,6 +214,28 @@ def _usage_ref() -> str:
 # Solde à 0 sans bienvenue : adresse jetable, ou plafond mensuel des bienvenues atteint
 WELCOME_CLOSED = ("Les crédits de bienvenue ne sont pas disponibles pour ce compte en ce moment. "
                   "Vous pouvez recharger vos crédits pour lancer une génération.")
+FREE_BUDGET = "Les essais gratuits sont en pause jusqu'au mois prochain. Les crédits achetés restent utilisables."
+NOT_ENOUGH = "Votre solde ne suffit pas pour une génération."
+# Outil décoché « Actif » dans wp-admin, ou palier absent : le solde n'y est pour rien, recharger ne sert à rien
+UNAVAILABLE = "L'outil est momentanément indisponible. Vos crédits ne sont pas touchés, réessayez un peu plus tard."
+
+
+def _credits_block(data: dict, cost) -> tuple[str, bool]:
+    """Pourquoi `balance` refuse le palier : (message, recharger aide-t-il ?).
+
+    Le porte-monnaie ne donne pas de raison quand l'outil est désactivé : si le solde couvre le prix
+    (ou si le palier n'a pas de prix), ce n'est pas un problème de solde.
+    """
+    reason, balance = data.get("closed_reason"), data.get("balance")
+    if reason == "welcome_closed":
+        return WELCOME_CLOSED, True
+    if reason == "free_budget":
+        return FREE_BUDGET, True
+    if reason == "tool_disabled":
+        return UNAVAILABLE, False
+    if isinstance(balance, int) and isinstance(cost, int) and balance < cost:
+        return NOT_ENOUGH, True
+    return UNAVAILABLE, False
 
 
 def _wallet_refusal(exc: wallet.WalletError) -> JSONResponse:
@@ -227,9 +249,9 @@ def _wallet_refusal(exc: wallet.WalletError) -> JSONResponse:
                       recharge_url=exc.data.get("recharge_url"))
     if exc.status == 403:
         reason = exc.data.get("closed_reason")
-        msg = ("Les essais gratuits sont en pause jusqu'au mois prochain. Les crédits achetés restent utilisables."
-               if reason == "free_budget" else "L'outil est momentanément fermé. Réessayez plus tard.")
-        return _error(403, "closed", msg, closed_reason=reason, recharge_url=exc.data.get("recharge_url"))
+        if reason == "free_budget":
+            return _error(403, "closed", FREE_BUDGET, closed_reason=reason, recharge_url=exc.data.get("recharge_url"))
+        return _error(403, "closed", UNAVAILABLE, closed_reason=reason)
     if exc.status in (404, 410):
         return _error(403, "unknown_member", "Votre compte n'est pas reconnu. Reconnectez-vous depuis creapulse.fr.")
     if exc.status == 401:
@@ -265,12 +287,12 @@ async def api_credits(request: Request):
         return _error(503, "wallet", "Solde indisponible pour le moment.")
     tier = settings.credits_tier
     can_start = bool((data.get("can_start") or {}).get(tier))
-    message = None
+    cost = (data.get("costs") or {}).get(tier)
+    message, recharge = None, True
     if not can_start:
-        message = (WELCOME_CLOSED if data.get("closed_reason") == "welcome_closed"
-                   else "Votre solde ne suffit pas pour une génération.")
-    return {"ok": True, "balance": data.get("balance"), "cost": (data.get("costs") or {}).get(tier),
-            "can_start": can_start, "recharge_url": data.get("recharge_url"),
+        message, recharge = _credits_block(data, cost)
+    return {"ok": True, "balance": data.get("balance"), "cost": cost,
+            "can_start": can_start, "recharge_url": data.get("recharge_url") if recharge else None,
             "closed_reason": data.get("closed_reason"), "message": message}
 
 
