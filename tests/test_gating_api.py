@@ -162,6 +162,41 @@ def test_a_blocked_tool_is_not_a_balance_problem(client, fake_wallet, monkeypatc
         assert "essais gratuits" in data["message"] and data["recharge_url"]
 
 
+@pytest.mark.parametrize("reason, balance, words, recharge", [
+    ("email_unconfirmed", 0, "Confirmez votre adresse", False),  # recharger ne débloque pas les crédits offerts
+    ("welcome_used", 0, "déjà reçu ses crédits offerts", True),
+    ("raison_future", 0, "ne suffit pas", True),                  # raison inconnue : on retombe sur le solde
+    ("raison_future", 50, "indisponible", False),
+])
+def test_closed_reasons_of_plugin_1_69(client, fake_wallet, monkeypatch, reason, balance, words, recharge):
+    real = fake_wallet.call
+    fake_wallet.balance = balance
+
+    async def with_reason(c, route, body):
+        out = await real(c, route, body)
+        return {**out, "closed_reason": reason, "can_start": {"generation": False}} if route == "balance" else out
+
+    monkeypatch.setattr("app.wallet.call", with_reason)
+    login(client)
+    data = client.get("/api/credits").json()
+    assert words in data["message"] and bool(data["recharge_url"]) is recharge
+
+
+@pytest.mark.parametrize("reason, words, recharge", [
+    ("email_unconfirmed", "Confirmez votre adresse", False),
+    ("welcome_used", "déjà reçu ses crédits offerts", True),
+    ("raison_future", "il vous en reste 0", True),
+])
+def test_debit_402_reasons(client, fake_wallet, reason, words, recharge):
+    from app.wallet import WalletError
+    fake_wallet.fail("debit", WalletError(402, "credits_insufficient", {
+        "balance": 0, "required": 10, "closed_reason": reason, "recharge_url": "https://staging.creapulse.fr/credits/"}))
+    login(client)
+    r = client.post("/api/generate", json={"urls": ["https://example.org/a"]})
+    body = r.json()
+    assert r.status_code == 402 and words in body["message"] and bool(body.get("recharge_url")) is recharge
+
+
 def test_a_disabled_tool_at_debit_offers_no_recharge(client, fake_wallet):
     from app.wallet import WalletError
     fake_wallet.fail("debit", WalletError(403, "tool_disabled", {"closed_reason": "tool_disabled", "retryable": False}))
