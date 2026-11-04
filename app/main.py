@@ -218,21 +218,31 @@ FREE_BUDGET = "Les essais gratuits sont en pause jusqu'au mois prochain. Les cr�
 NOT_ENOUGH = "Votre solde ne suffit pas pour une génération."
 # Outil décoché « Actif » dans wp-admin, ou palier absent : le solde n'y est pour rien, recharger ne sert à rien
 UNAVAILABLE = "L'outil est momentanément indisponible. Vos crédits ne sont pas touchés, réessayez un peu plus tard."
+# Plugin 1.69.0 : crédits offerts retenus jusqu'à la confirmation de l'adresse, ou déjà reçus par la même boîte
+EMAIL_UNCONFIRMED = ("Confirmez votre adresse e-mail (lien reçu à l'inscription) "
+                     "pour recevoir vos crédits offerts.")
+WELCOME_USED = ("Cette adresse e-mail a déjà reçu ses crédits offerts avec un autre compte. "
+                "Rechargez pour lancer une génération.")
+
+# closed_reason → (message, recharger aide-t-il ?). Une raison inconnue retombe sur le solde ou l'indisponibilité.
+REASONS = {
+    "tool_disabled": (UNAVAILABLE, False),
+    "free_budget": (FREE_BUDGET, True),
+    "email_unconfirmed": (EMAIL_UNCONFIRMED, False),
+    "welcome_used": (WELCOME_USED, True),
+    "welcome_closed": (WELCOME_CLOSED, True),
+}
 
 
 def _credits_block(data: dict, cost) -> tuple[str, bool]:
     """Pourquoi `balance` refuse le palier : (message, recharger aide-t-il ?).
 
-    Le porte-monnaie ne donne pas de raison quand l'outil est désactivé : si le solde couvre le prix
-    (ou si le palier n'a pas de prix), ce n'est pas un problème de solde.
+    Sans raison connue : si le solde couvre le prix (ou si le palier n'a pas de prix), ce n'est pas un
+    problème de solde, l'outil est indisponible.
     """
     reason, balance = data.get("closed_reason"), data.get("balance")
-    if reason == "welcome_closed":
-        return WELCOME_CLOSED, True
-    if reason == "free_budget":
-        return FREE_BUDGET, True
-    if reason == "tool_disabled":
-        return UNAVAILABLE, False
+    if reason in REASONS:
+        return REASONS[reason]
     if isinstance(balance, int) and isinstance(cost, int) and balance < cost:
         return NOT_ENOUGH, True
     return UNAVAILABLE, False
@@ -242,11 +252,10 @@ def _wallet_refusal(exc: wallet.WalletError) -> JSONResponse:
     """Traduit un refus du porte-monnaie pour le membre. Rien n'a été lancé."""
     if exc.status == 402:
         required, left = exc.data.get("required"), exc.data.get("balance")
-        msg = f"Une génération demande {required} crédits, il vous en reste {left}."
-        if exc.data.get("closed_reason") == "welcome_closed":
-            msg = WELCOME_CLOSED
+        msg, recharge = REASONS.get(exc.data.get("closed_reason"),
+                                    (f"Une génération demande {required} crédits, il vous en reste {left}.", True))
         return _error(402, "need_credits", msg, balance=left, required=required,
-                      recharge_url=exc.data.get("recharge_url"))
+                      recharge_url=exc.data.get("recharge_url") if recharge else None)
     if exc.status == 403:
         reason = exc.data.get("closed_reason")
         if reason == "free_budget":
