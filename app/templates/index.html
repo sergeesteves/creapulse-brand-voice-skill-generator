@@ -26,7 +26,7 @@
     <p class="kicker">Outil Creapulse</p>
     <h1>Générateur de skill de voix de marque IA</h1>
     <p class="lead">Vous avez déjà une voix. Elle est dans vos articles. Collez {{ min_urls }} à {{ max_urls }} URLs de textes que <strong>vous</strong> avez écrits : l'outil en distille les règles (ton, phrases, vocabulaire, structure, positionnement) et vous rend un profil prêt à coller dans ChatGPT ou Claude — en bloc prompt, ou en skill.</p>
-    <p class="note">Avec un compte Creapulse, vos crédits de bienvenue couvrent vos premiers essais. Le contenu de vos pages n'est pas conservé : il est lu, distillé, puis oublié. Le profil non plus, sauf si vous choisissez de le garder dans votre compte.</p>
+    <p class="note">Avec un compte Creapulse, des crédits de bienvenue couvrent vos premiers essais, dans la limite des offres du mois. Le contenu de vos pages n'est pas conservé : il est lu, distillé, puis oublié. Le profil non plus, sauf si vous choisissez de le garder dans votre compte.</p>
   </section>
 
   {% if embed %}
@@ -38,7 +38,7 @@
   {% if locked %}
   <section class="card locked">
     <h2>Réservé aux membres</h2>
-    <p>Cet outil est accessible avec un compte Creapulse{% if settings.required_levels %} et l'adhésion correspondante{% endif %}. À la création du compte, des crédits de bienvenue vous permettent de l'essayer.</p>
+    <p>Cet outil est accessible avec un compte Creapulse{% if settings.required_levels %} et l'adhésion correspondante{% endif %}. À la création du compte, des crédits de bienvenue vous permettent de l'essayer, dans la limite des offres du mois.</p>
     <div class="row">
       {% if login_url %}<a class="secondary button" href="{{ login_url }}" target="_top">Se connecter</a>{% endif %}
       {% if register_url %}<a class="secondary button" href="{{ register_url }}" target="_top">Créer un compte</a>{% endif %}

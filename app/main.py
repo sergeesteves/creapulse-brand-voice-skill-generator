@@ -211,9 +211,9 @@ def _usage_ref() -> str:
     return f"voix{secrets.token_hex(8)}:1"
 
 
-# Solde à 0 sans bienvenue : adresse jetable, ou plafond mensuel des bienvenues atteint
-WELCOME_CLOSED = ("Les crédits de bienvenue ne sont pas disponibles pour ce compte en ce moment. "
-                  "Vous pouvez recharger vos crédits pour lancer une génération.")
+# Solde à 0 sans bienvenue (plugin 1.86.0) : nombre d'offres du mois atteint, ou budget du gratuit atteint
+WELCOME_CLOSED = ("Il n'y a plus d'offre de bienvenue ce mois-ci. "
+                  "Un pack de crédits permet de lancer une génération tout de suite.")
 FREE_BUDGET = "Les essais gratuits sont en pause jusqu'au mois prochain. Les crédits achetés restent utilisables."
 NOT_ENOUGH = "Votre solde ne suffit pas pour une génération."
 # Outil décoché « Actif » dans wp-admin, ou palier absent : le solde n'y est pour rien, recharger ne sert à rien
