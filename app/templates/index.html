@@ -209,11 +209,13 @@
     $('#recharge-row').hidden = !url;
     if (url) $('#recharge-link').href = url;
   }
-  function renderCredits(balance, cost, canStart, rechargeUrl, message) {
+  // costMoney / balanceMoney : textes en euros prêts à afficher, fournis par le porte-monnaie (absents = crédits seuls)
+  function renderCredits(balance, cost, canStart, rechargeUrl, message, costMoney, balanceMoney) {
     if (balance === null || balance === undefined) return;
-    document.querySelectorAll('.pill.credits').forEach(el => { el.textContent = 'Solde : ' + balance + ' crédits'; el.hidden = false; });
+    const solde = 'Solde : ' + balance + ' crédits' + (balanceMoney ? ' (≈ ' + balanceMoney + ')' : '');
+    document.querySelectorAll('.pill.credits').forEach(el => { el.textContent = solde; el.hidden = false; });
     if (cost !== null && cost !== undefined) {
-      creditsHint.textContent = 'Une génération : ' + cost + ' crédits';
+      creditsHint.textContent = 'Une génération : ' + cost + ' crédits' + (costMoney ? ' (dès ' + costMoney + ')' : '');
       creditsHint.hidden = false;
     }
     if (canStart === false) {
@@ -222,14 +224,16 @@
       showRecharge(rechargeUrl);
     }
   }
-  let creditsCost = null;
+  let creditsCost = null, creditsCostMoney = null;
   async function loadCredits() {
     if (!creditsHint || form.closest('[hidden]')) return;
     const res = await fetch(ROOT + '/api/credits').catch(() => null);
     const data = res ? await res.json().catch(() => null) : null;
     if (!data || !data.ok) return;
     creditsCost = data.cost;
-    renderCredits(data.balance, data.cost, data.can_start, data.recharge_url, data.message);
+    creditsCostMoney = data.cost_money;
+    renderCredits(data.balance, data.cost, data.can_start, data.recharge_url, data.message,
+                  data.cost_money, data.balance_money);
   }
   loadCredits();
 
@@ -252,7 +256,7 @@
         return;
       }
       renderResult(data);
-      renderCredits(data.balance, creditsCost, null, null);
+      renderCredits(data.balance, creditsCost, null, null, null, creditsCostMoney);  // les euros du solde reviennent avec loadCredits
       loadHistory();
     } catch (err) {
       showError('Erreur réseau. Réessayez.');
