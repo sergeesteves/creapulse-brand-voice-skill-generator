@@ -300,9 +300,21 @@ async def api_credits(request: Request):
     message, recharge = None, True
     if not can_start:
         message, recharge = _credits_block(data, cost)
+    money = data.get("money")  # plugin 1.92.0 ; null = crédits seuls
     return {"ok": True, "balance": data.get("balance"), "cost": cost,
+            "cost_money": _money_text(money, "costs", tier), "balance_money": _money_text(money, "balance"),
+            "money": money if isinstance(money, dict) else None,
             "can_start": can_start, "recharge_url": data.get("recharge_url") if recharge else None,
             "closed_reason": data.get("closed_reason"), "message": message}
+
+
+def _money_text(money, *path: str) -> str | None:
+    """Texte en euros prêt à afficher (`money.costs.<palier>.text`, `money.balance.text`), jamais recalculé ici."""
+    node = money
+    for key in path:
+        node = node.get(key) if isinstance(node, dict) else None
+    text = node.get("text") if isinstance(node, dict) else None
+    return (text.strip() or None) if isinstance(text, str) else None
 
 
 @app.post("/api/generate")

@@ -113,7 +113,33 @@ def test_credits_route_gives_balance_and_price(client, fake_wallet):
     login(client)
     data = client.get("/api/credits").json()
     assert data == {"ok": True, "balance": 50, "cost": 10, "can_start": True,
+                    "cost_money": None, "balance_money": None, "money": None,
                     "recharge_url": "https://staging.creapulse.fr/credits/", "closed_reason": None, "message": None}
+
+
+MONEY = {"currency": "EUR", "credit_price": 0.099,
+         "costs": {"generation": {"amount": 1.49, "text": "1,49 €"}},
+         "balance": {"amount": 39.6, "text": "39,60 €"}}
+
+
+@pytest.mark.parametrize("money, cost_text, balance_text", [
+    (MONEY, "1,49 €", "39,60 €"),           # plugin 1.92.0 : textes repris tels quels, jamais recalculés
+    (None, None, None),                                 # aucun pack en vente : crédits seuls
+    ({**MONEY, "costs": []}, None, "39,60 €"),     # sans palier, costs sort en liste vide
+    ({"costs": {"generation": {"amount": 1.49}}}, None, None),  # texte absent : on n'affiche rien
+])
+def test_credits_route_passes_euro_texts(client, fake_wallet, monkeypatch, money, cost_text, balance_text):
+    real = fake_wallet.call
+
+    async def with_money(c, route, body):
+        out = await real(c, route, body)
+        return {**out, "money": money} if route == "balance" else out
+
+    monkeypatch.setattr("app.wallet.call", with_money)
+    login(client)
+    data = client.get("/api/credits").json()
+    assert data["cost_money"] == cost_text and data["balance_money"] == balance_text
+    assert data["cost"] == 10 and data["can_start"] is True
 
 
 def test_a_refused_welcome_says_so_instead_of_a_bare_zero(client, fake_wallet, monkeypatch):
